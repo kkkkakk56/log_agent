@@ -4,9 +4,9 @@ This file is the human-readable roadmap for `journal-agent`. The machine-readabl
 
 ## Iteration Workflow
 
-Use this loop for each Codex iteration:
+Use this loop for each Codex iteration. The preferred source is the `implementationQueue` array in [`feature_list.json`](feature_list.json), because it is closer to the CORE/FEAT style task cards you described.
 
-1. Pick the highest-priority feature with status `ready`.
+1. Pick the highest-priority task with status `ready`.
 2. Implement that feature end-to-end in a focused change.
 3. Update `feature_list.json` and this file with status, notes, and verification.
 4. Run required verification:
@@ -44,6 +44,58 @@ git commit -m "feat: add draft auto-save"
 git push origin main
 ```
 
+### Autonomous Iteration
+
+Codex can work in this rhythm when you say something like `继续下一个功能`, `开始自动迭代`, or `按 feature_list 往下做`:
+
+1. Read `implementationQueue`.
+2. Pick the first `ready` task whose dependencies are complete.
+3. Implement the task.
+4. Run the task's `verify_cmd`.
+5. If verification passes, mark `passes: true`, update the task/feature status, and commit.
+6. Move to the next ready task only if you explicitly asked for autonomous iteration.
+
+Stop conditions:
+
+- Verification fails and the fix is not obvious.
+- The next task requires paid accounts, certificates, secrets, or external credentials.
+- The next task involves a product decision with real tradeoffs.
+- Git contains unexpected unrelated changes that may be your work.
+
+## Requirement Card Format
+
+You can paste requirements in a compact format like this:
+
+```json
+{
+  "id": "TASK-009",
+  "category": "feature",
+  "description": "搜索结果高亮：命中的关键词在列表中被明显标记",
+  "steps": [
+    "在搜索框输入关键词",
+    "验证标题和正文里的命中词被高亮",
+    "验证清空搜索后高亮消失"
+  ],
+  "passes": false,
+  "verify_cmd": "cd journal-agent && npm run build"
+}
+```
+
+For this project, the recommended fields are:
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable id, such as `TASK-005`, `CORE-11`, or `FEAT-01` |
+| `featureId` | Optional link to a product feature like `F005` |
+| `category` | `core`, `feature`, `workflow`, `test`, `docs`, or `bugfix` |
+| `description` | One-sentence outcome |
+| `status` | `ready`, `planned`, `blocked`, `deferred`, or `done` |
+| `priority` | Lower number runs earlier |
+| `dependsOn` | Task ids or feature ids that must be complete first |
+| `steps` | Concrete behavior and acceptance checks |
+| `passes` | `true` only after verification passes |
+| `verify_cmd` | Primary command Codex should run after implementation |
+
 ## Automation Policy
 
 Current policy:
@@ -51,7 +103,7 @@ Current policy:
 | Setting | Value |
 |---|---|
 | Auto commit | Yes, after verification passes |
-| Auto push | No, not until GitHub SSH access is confirmed and the user explicitly approves |
+| Auto push | No, only when the user explicitly approves or `autoPush` is changed to `true` |
 | Required checks | `npm run build`, `npx cap sync ios` |
 | Optional native check | `xcodebuild` simulator build |
 
@@ -61,6 +113,17 @@ Safe-commit rules:
 - Do not commit private keys, certificates, provisioning profiles, API keys, or App Store Connect secrets.
 - Keep each commit focused on one feature or one maintenance task.
 - Update both backlog files when a feature changes status.
+
+## Implementation Queue
+
+These are the current task cards Codex should read first:
+
+| Task | Status | Description | Verify |
+|---|---|---|---|
+| `TASK-005` | `ready` | 草稿自动保存：未提交的日志内容在刷新、关闭或切后台后可以恢复 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-006` | `planned` | 本地数据导出：把日志导出为 JSON 和 Markdown，便于备份 | `cd journal-agent && npm run build` |
+| `TASK-007` | `planned` | 心情与标签：日志支持 mood 和 tags，并在列表、搜索、日历中展示 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-008` | `planned` | 搜索体验优化：高亮关键词、清空查询、显示命中片段 | `cd journal-agent && npm run build` |
 
 ## Status Legend
 
@@ -189,4 +252,4 @@ Move from free-account local install to TestFlight distribution.
 
 ## Next Recommendation
 
-Commit the backlog and repository hygiene changes, then implement `F005: Draft Auto-Save`.
+Implement `TASK-005 / F005: Draft Auto-Save`, then run its verification command and commit the result.

@@ -8,7 +8,26 @@
   },
   "codexWorkflow": {
     "defaultBranch": "main",
-    "iterationPolicy": "Pick one ready feature, implement it end-to-end, update this file and feature_list.md, run verification, create a focused commit, then push only when explicitly approved or autoPush is enabled.",
+    "iterationPolicy": "Read implementationQueue first. Pick the highest-priority ready task, implement it end-to-end, run its verify_cmd plus required checks when relevant, update feature_list.json and feature_list.md, create a focused commit, then continue only within the approved iteration limit. Push only when explicitly approved or autoPush is enabled.",
+    "taskSource": "implementationQueue",
+    "taskSelectionRules": [
+      "Prefer status=ready over planned.",
+      "Within ready tasks, choose the lowest priority number.",
+      "Skip tasks whose dependsOn items are not done.",
+      "If a task is too large, split it into smaller ready tasks before coding.",
+      "Mark passes=true only after the listed verification succeeds or the verification gap is documented."
+    ],
+    "iterationControls": {
+      "defaultMode": "one_task_per_user_request",
+      "autonomousModeTrigger": "User explicitly says to continue iterating, auto-iterate, or develop the next feature.",
+      "maxTasksPerAutonomousRun": 3,
+      "stopConditions": [
+        "A verification command fails and the fix is not obvious.",
+        "A task requires account credentials, paid services, certificates, or secrets.",
+        "A product decision has meaningful tradeoffs.",
+        "Git has unexpected unrelated changes that could be user work."
+      ]
+    },
     "autoCommit": true,
     "autoPush": false,
     "requiredVerification": [
@@ -32,6 +51,112 @@
     "planned",
     "blocked",
     "deferred"
+  ],
+  "taskStatuses": [
+    "done",
+    "ready",
+    "planned",
+    "blocked",
+    "deferred"
+  ],
+  "taskCardSchema": {
+    "id": "Stable task id, such as TASK-005 or CORE-11.",
+    "featureId": "Optional link to a feature id in features.",
+    "category": "core, feature, workflow, test, docs, or bugfix.",
+    "description": "One-sentence user-facing outcome.",
+    "status": "ready, planned, blocked, deferred, or done.",
+    "priority": "Lower number runs earlier.",
+    "dependsOn": "Task ids or feature ids that must be done first.",
+    "steps": "Concrete behavior and acceptance steps.",
+    "passes": "true only after verification passes.",
+    "verify_cmd": "Primary command Codex should run after implementation.",
+    "notes": "Implementation hints, risks, or verification evidence."
+  },
+  "implementationQueue": [
+    {
+      "id": "TASK-005",
+      "featureId": "F005",
+      "category": "feature",
+      "description": "草稿自动保存：未提交的日志内容在刷新、关闭或切后台后可以恢复",
+      "status": "ready",
+      "priority": 5,
+      "dependsOn": [
+        "F002"
+      ],
+      "steps": [
+        "在本地存储中增加独立的 draft key，不混入正式日志数据",
+        "用户输入标题、正文或标签时自动保存草稿",
+        "重新打开 App 后恢复未提交草稿",
+        "成功保存日志后清空草稿",
+        "提供一个手动清空草稿的入口"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "建议使用 journal-agent.draft.v1，先不引入新依赖。"
+    },
+    {
+      "id": "TASK-006",
+      "featureId": "F006",
+      "category": "feature",
+      "description": "本地数据导出：把日志导出为 JSON 和 Markdown，便于备份",
+      "status": "planned",
+      "priority": 6,
+      "dependsOn": [
+        "F002"
+      ],
+      "steps": [
+        "增加导出入口",
+        "导出全部未删除日志为 JSON",
+        "导出可读 Markdown",
+        "导出内容包含 createdAt、updatedAt、tags、mood 等元数据",
+        "浏览器环境先使用下载文件方式，iOS 分享能力后续再做"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "第一版优先保证数据可拿出来。"
+    },
+    {
+      "id": "TASK-007",
+      "featureId": "F007",
+      "category": "feature",
+      "description": "心情与标签：日志支持 mood 和 tags，并在列表、搜索、日历中展示",
+      "status": "planned",
+      "priority": 7,
+      "dependsOn": [
+        "F002",
+        "F003"
+      ],
+      "steps": [
+        "编辑日志时可以选择一个心情",
+        "编辑日志时可以添加和删除标签",
+        "时间线卡片展示心情和标签",
+        "搜索可以匹配标签",
+        "日历后续可以按当天主要心情改变标记颜色"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "数据模型已经预留 mood 和 tags，可优先补 UI。"
+    },
+    {
+      "id": "TASK-008",
+      "featureId": "F008",
+      "category": "feature",
+      "description": "搜索体验优化：高亮关键词、清空查询、显示命中片段",
+      "status": "planned",
+      "priority": 8,
+      "dependsOn": [
+        "F003"
+      ],
+      "steps": [
+        "搜索结果中高亮匹配关键词",
+        "搜索框提供一键清空按钮",
+        "长日志显示围绕命中位置的摘要片段",
+        "至少 1000 条本地日志下搜索仍保持流畅"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "先不要引入重型搜索库。"
+    }
   ],
   "features": [
     {
