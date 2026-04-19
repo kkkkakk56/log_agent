@@ -218,7 +218,7 @@
       "featureId": "F017",
       "category": "feature",
       "description": "Agent 多对话与存储：支持打开新对话，并把不同对话的消息记录持久化保存",
-      "status": "ready",
+      "status": "done",
       "priority": 7,
       "dependsOn": [
         "F014",
@@ -234,9 +234,9 @@
         "对话标题可先由第一条用户消息自动生成",
         "保留日志读取工具能力：每次发送消息仍可读取当前日志上下文"
       ],
-      "passes": false,
+      "passes": true,
       "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
-      "notes": "建议新增 agentConversationStore，使用独立 localStorage key，例如 journal-agent.agent.conversations.v1。后续可以再做删除、重命名、搜索对话。"
+      "notes": "已完成。新增 agentConversationStore，使用独立 localStorage key：journal-agent.agent.conversations.v1。支持新建、切换、自动标题和重启恢复；后续可以再做删除、重命名、搜索对话。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "TASK-014",
@@ -539,7 +539,7 @@
     {
       "id": "F017",
       "title": "Agent 多对话与存储",
-      "status": "ready",
+      "status": "done",
       "priority": 7,
       "phase": "M2-local-journal",
       "summary": "让 Agent 支持新建多个独立对话，并把对话消息持久化保存到本地。",
@@ -560,7 +560,7 @@
         "npm run build",
         "npx cap sync ios"
       ],
-      "notes": "第一版先做本地 localStorage 存储；标题可由第一条用户消息自动生成。"
+      "notes": "已完成。第一版使用本地 localStorage 存储；标题由第一条用户消息自动生成。"
     },
     {
       "id": "F018",

@@ -12,6 +12,14 @@ import {
 } from './services/agentClient';
 import { buildJournalContextTool } from './services/journalContextTool';
 import {
+  appendAgentConversationMessage,
+  createAgentConversation,
+  getActiveAgentConversationId,
+  getAgentConversations,
+  setActiveAgentConversationId,
+  type AgentConversation,
+} from './storage/agentConversationStore';
+import {
   createEntry,
   deleteEntry,
   getEntries,
@@ -33,6 +41,21 @@ import {
 
 type ActiveView = 'timeline' | 'search' | 'calendar';
 
+function createAgentWelcomeMessage(): AgentChatMessage {
+  return createAgentMessage(
+    'assistant',
+    isAgentUsingPlaceholder()
+      ? '你好，我是心记 Agent。现在我还在使用占位模型，但已经可以先陪你整理想法、生成日志提示。'
+      : '你好，我是心记 Agent。已经检测到本地 .env API 配置，可以尝试调用真实模型。',
+  );
+}
+
+const initialAgentConversations = getAgentConversations();
+
+if (initialAgentConversations.length === 0) {
+  createAgentConversation([createAgentWelcomeMessage()]);
+}
+
 const entries = ref<JournalEntry[]>(getEntries());
 const activeView = ref<ActiveView>('timeline');
 const draftContent = ref('');
@@ -44,14 +67,10 @@ const selectedDateKey = ref(getLocalDateKey(new Date()));
 const agentPanelOpen = ref(false);
 const agentInput = ref('');
 const agentIsThinking = ref(false);
-const agentMessages = ref<AgentChatMessage[]>([
-  createAgentMessage(
-    'assistant',
-    isAgentUsingPlaceholder()
-      ? '你好，我是心记 Agent。现在我还在使用占位模型，但已经可以先陪你整理想法、生成日志提示。'
-      : '你好，我是心记 Agent。已经检测到本地 .env API 配置，可以尝试调用真实模型。',
-  ),
-]);
+const agentConversations = ref<AgentConversation[]>(getAgentConversations());
+const activeAgentConversationId = ref<string | null>(
+  getActiveAgentConversationId(agentConversations.value),
+);
 
 const groupedEntries = computed(() => groupEntriesByDate(entries.value));
 
@@ -76,6 +95,17 @@ const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(() => draftCharacterCount.value > 0);
 const agentModeLabel = computed(() => getAgentModeLabel());
 const agentModelLabel = computed(() => getAgentModelLabel());
+const activeAgentConversation = computed(() =>
+  agentConversations.value.find(
+    (conversation) => conversation.id === activeAgentConversationId.value,
+  ) ??
+  agentConversations.value[0] ??
+  null,
+);
+const agentMessages = computed(() => activeAgentConversation.value?.messages ?? []);
+const activeAgentConversationTitle = computed(
+  () => activeAgentConversation.value?.title ?? '新对话',
+);
 const agentJournalContext = computed(() =>
   buildJournalContextTool(entries.value, agentInput.value),
 );
@@ -120,6 +150,21 @@ const selectedDateLabel = computed(() => {
 
 function refreshEntries() {
   entries.value = getEntries();
+}
+
+function refreshAgentConversations() {
+  agentConversations.value = getAgentConversations();
+
+  if (
+    !activeAgentConversationId.value ||
+    !agentConversations.value.some(
+      (conversation) => conversation.id === activeAgentConversationId.value,
+    )
+  ) {
+    activeAgentConversationId.value = getActiveAgentConversationId(
+      agentConversations.value,
+    );
+  }
 }
 
 function setActiveView(view: ActiveView) {
@@ -229,6 +274,31 @@ function closeAgentPanel() {
   agentPanelOpen.value = false;
 }
 
+function startNewAgentConversation() {
+  const conversation = createAgentConversation([createAgentWelcomeMessage()]);
+  activeAgentConversationId.value = conversation.id;
+  agentInput.value = '';
+  refreshAgentConversations();
+}
+
+function selectAgentConversation(id: string) {
+  activeAgentConversationId.value = id;
+  setActiveAgentConversationId(id);
+  agentInput.value = '';
+}
+
+function ensureActiveAgentConversation(): AgentConversation {
+  if (activeAgentConversation.value) {
+    return activeAgentConversation.value;
+  }
+
+  const conversation = createAgentConversation([createAgentWelcomeMessage()]);
+  activeAgentConversationId.value = conversation.id;
+  refreshAgentConversations();
+
+  return conversation;
+}
+
 async function submitAgentMessage() {
   const content = agentInput.value.trim();
 
@@ -236,25 +306,32 @@ async function submitAgentMessage() {
     return;
   }
 
+  const conversation = ensureActiveAgentConversation();
   const userMessage = createAgentMessage('user', content);
-  agentMessages.value = [...agentMessages.value, userMessage];
+  appendAgentConversationMessage(conversation.id, userMessage);
+  refreshAgentConversations();
   agentInput.value = '';
   agentIsThinking.value = true;
 
   try {
+    const requestConversation = agentConversations.value.find(
+      (item) => item.id === conversation.id,
+    );
     const assistantMessage = await sendAgentMessage({
-      messages: agentMessages.value,
+      messages: requestConversation?.messages ?? [userMessage],
       entries: entries.value,
     });
-    agentMessages.value = [...agentMessages.value, assistantMessage];
+    appendAgentConversationMessage(conversation.id, assistantMessage);
+    refreshAgentConversations();
   } catch {
-    agentMessages.value = [
-      ...agentMessages.value,
+    appendAgentConversationMessage(
+      conversation.id,
       createAgentMessage(
         'assistant',
         '我刚刚没有连上模型服务。现在先检查占位 URL / API Key / model，之后我们会把真实请求接到后端代理。',
       ),
-    ];
+    );
+    refreshAgentConversations();
   } finally {
     agentIsThinking.value = false;
   }
@@ -585,14 +662,32 @@ async function submitAgentMessage() {
           </span>
           <div>
             <p class="eyebrow">{{ agentModeLabel }}</p>
-            <h2 id="agent-title">心记 Agent</h2>
+            <h2 id="agent-title">{{ activeAgentConversationTitle }}</h2>
             <span>{{ agentModelLabel }}</span>
             <small>{{ agentJournalContext.statusLabel }}</small>
           </div>
-          <button class="panel-close" type="button" aria-label="关闭 Agent 浮窗" @click="closeAgentPanel">
-            关闭
-          </button>
+          <div class="agent-header-actions">
+            <button class="panel-close" type="button" @click="startNewAgentConversation">
+              新对话
+            </button>
+            <button class="panel-close" type="button" aria-label="关闭 Agent 浮窗" @click="closeAgentPanel">
+              关闭
+            </button>
+          </div>
         </header>
+
+        <div class="agent-conversation-list" aria-label="Agent 历史对话">
+          <button
+            v-for="conversation in agentConversations"
+            :key="conversation.id"
+            type="button"
+            :class="{ active: conversation.id === activeAgentConversationId }"
+            @click="selectAgentConversation(conversation.id)"
+          >
+            <strong>{{ conversation.title }}</strong>
+            <span>{{ conversation.messages.length }} 条消息</span>
+          </button>
+        </div>
 
         <div class="agent-messages" aria-live="polite">
           <article
