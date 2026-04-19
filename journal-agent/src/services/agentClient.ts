@@ -1,6 +1,8 @@
 import type { JournalEntry } from '../types/journal';
+import { buildJournalContextTool } from './journalContextTool';
 
 export type AgentMessageRole = 'user' | 'assistant';
+type AgentApiMessageRole = AgentMessageRole | 'system';
 
 export interface AgentChatMessage {
   id: string;
@@ -13,6 +15,19 @@ interface SendAgentMessageOptions {
   messages: AgentChatMessage[];
   entries: JournalEntry[];
 }
+
+interface AgentApiMessage {
+  role: AgentApiMessageRole;
+  content: string;
+}
+
+const AGENT_SYSTEM_PROMPT = [
+  '你是「心记 Agent」，一个帮助用户回顾、整理和理解个人日志的中文助手。',
+  '你可以读取由 App 提供的本地日志工具结果，但不能访问工具结果之外的日志。',
+  '回答日志相关问题时，要优先引用或概括已提供日志中的事实。',
+  '如果工具上下文没有足够证据，请直接说明“当前日志里看不出来”，不要编造。',
+  '语气保持温和、简洁、像一个可靠的私人记录助手。',
+].join('\n');
 
 const normalizeChatEndpoint = (apiUrl: string): string => {
   const normalizedUrl = apiUrl.trim().replace(/\/+$/, '');
@@ -101,16 +116,41 @@ const readAssistantContent = (data: unknown): string | null => {
 };
 
 const createMockReply = (message: string, entries: JournalEntry[]): string => {
-  const latestEntry = entries[0];
-  const entryHint = latestEntry
-    ? `我也看到你最近写过「${latestEntry.title}」。`
-    : '等你写下第一条日志后，我可以帮你一起整理线索。';
+  const journalContext = buildJournalContextTool(entries, message);
+  const entryHint =
+    journalContext.includedEntries > 0
+      ? `我已经通过日志工具读取到 ${journalContext.includedEntries} 条上下文。`
+      : '等你写下第一条日志后，我可以帮你一起整理线索。';
 
   return [
     `我先用占位模型回应你：${message}`,
     entryHint,
+    `日志工具状态：${journalContext.statusLabel}`,
     '真实大模型接入时，我们会把 API Key 放在后端代理里，而不是直接放进 App 客户端。',
   ].join('\n\n');
+};
+
+const buildAgentApiMessages = (
+  messages: AgentChatMessage[],
+  entries: JournalEntry[],
+  latestUserMessage: string,
+): AgentApiMessage[] => {
+  const journalContext = buildJournalContextTool(entries, latestUserMessage);
+
+  return [
+    {
+      role: 'system',
+      content: AGENT_SYSTEM_PROMPT,
+    },
+    {
+      role: 'system',
+      content: journalContext.toolMessage,
+    },
+    ...messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+  ];
 };
 
 export const createAgentMessage = (
@@ -155,10 +195,7 @@ export const sendAgentMessage = async ({
     },
     body: JSON.stringify({
       model: getAgentModelLabel(),
-      messages: messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
+      messages: buildAgentApiMessages(messages, entries, latestUserMessage.content),
     }),
   });
 

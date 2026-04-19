@@ -779,9 +779,18 @@ h3 {
 }
 
 .agent-panel-header span:not(.anime-avatar, .avatar-hair, .avatar-face) {
+  display: block;
   color: #86868b;
   font-size: 12px;
   font-weight: 650;
+}
+
+.agent-panel-header small {
+  display: block;
+  margin-top: 3px;
+  color: #007aff;
+  font-size: 11px;
+  font-weight: 720;
 }
 
 .panel-close {

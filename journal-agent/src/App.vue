@@ -10,6 +10,7 @@ import {
   sendAgentMessage,
   type AgentChatMessage,
 } from './services/agentClient';
+import { buildJournalContextTool } from './services/journalContextTool';
 import {
   createEntry,
   deleteEntry,
@@ -75,6 +76,9 @@ const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(() => draftCharacterCount.value > 0);
 const agentModeLabel = computed(() => getAgentModeLabel());
 const agentModelLabel = computed(() => getAgentModelLabel());
+const agentJournalContext = computed(() =>
+  buildJournalContextTool(entries.value, agentInput.value),
+);
 const canSendAgentMessage = computed(
   () => agentInput.value.trim().length > 0 && !agentIsThinking.value,
 );
@@ -583,6 +587,7 @@ async function submitAgentMessage() {
             <p class="eyebrow">{{ agentModeLabel }}</p>
             <h2 id="agent-title">心记 Agent</h2>
             <span>{{ agentModelLabel }}</span>
+            <small>{{ agentJournalContext.statusLabel }}</small>
           </div>
           <button class="panel-close" type="button" aria-label="关闭 Agent 浮窗" @click="closeAgentPanel">
             关闭

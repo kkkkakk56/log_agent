@@ -190,6 +190,30 @@
       "notes": "已完成。当前按用户要求先做客户端直连验证；真实发布前应改为后端代理，避免密钥暴露在客户端包中。验证通过：npm run build，npm run test:agent-api，npx cap sync ios。"
     },
     {
+      "id": "TASK-012",
+      "featureId": "F016",
+      "category": "feature",
+      "description": "Agent 日志读取工具：让 Agent 可以读取当前本地日志上下文，并基于日志内容回答问题",
+      "status": "done",
+      "priority": 6,
+      "dependsOn": [
+        "F002",
+        "F014",
+        "F015"
+      ],
+      "steps": [
+        "新增本地 journal context tool，负责选择最近和相关日志",
+        "工具输出包含日志总数、本次提供数量、日期范围、标题、时间、标签、心情和正文摘要",
+        "真实 API 请求时把工具输出作为系统上下文注入给 Agent",
+        "占位模式下也使用同一个工具上下文，避免两套行为不一致",
+        "Agent 浮窗显示当前可读取的日志数量和发送范围",
+        "提示模型只能基于已提供日志回答，缺少依据时要说明无法判断"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npm run test:agent-api",
+      "notes": "已完成。第一版是客户端本地工具抽象，后续迁移后端时可以替换成真正 function/tool call。注意：使用真实 API 时，本地日志上下文会发送给模型服务。验证通过：npm run build，npm run test:agent-api，npx cap sync ios。"
+    },
+    {
       "id": "TASK-006",
       "featureId": "F006",
       "category": "feature",
@@ -435,6 +459,33 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。按用户要求先支持本地客户端直连测试；真实分发前应迁移到后端代理。"
+    },
+    {
+      "id": "F016",
+      "title": "Agent 日志读取工具",
+      "status": "done",
+      "priority": 6,
+      "phase": "M2-local-journal",
+      "summary": "为 Agent 增加本地日志上下文工具，让它可以基于用户日志内容回答问题，而不是只看聊天消息。",
+      "dependsOn": [
+        "F002",
+        "F014",
+        "F015"
+      ],
+      "acceptanceCriteria": [
+        "存在独立的 journal context tool，用于生成日志上下文。",
+        "真实 API 请求会携带日志工具输出。",
+        "占位模式也复用同一份日志工具上下文。",
+        "工具输出限制数量和长度，避免一次发送过多内容。",
+        "Agent 浮窗显示当前日志读取范围。",
+        "模型提示中明确禁止编造不存在的日志。"
+      ],
+      "verification": [
+        "npm run build",
+        "npm run test:agent-api",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。第一版先做客户端工具抽象；真实 API 模式会把本地日志上下文发送给模型服务。"
     },
     {
       "id": "F006",

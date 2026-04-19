@@ -123,8 +123,25 @@ const response = await fetch(apiUrl, {
     model,
     messages: [
       {
+        role: 'system',
+        content:
+          '你是心记 Agent。你可以读取 App 注入的 journal.read_context 工具结果，但不能编造工具结果之外的日志。',
+      },
+      {
+        role: 'system',
+        content: [
+          '[tool_result: journal.read_context]',
+          '日志总数: 1',
+          '本次提供日志数: 1',
+          '### 日志 1',
+          'title: API 测试日志',
+          'content: 心记 API 测试成功。',
+          '[/tool_result]',
+        ].join('\n'),
+      },
+      {
         role: 'user',
-        content: '请用一句中文回复：心记 API 测试成功。',
+        content: '请根据日志工具内容，用一句中文回复测试结果。',
       },
     ],
   }),
