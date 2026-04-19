@@ -120,9 +120,12 @@ export const createEntry = (
 
 export const updateEntry = (
   id: string,
-  content: string,
+  fieldsOrContent: string | { title?: string; content: string },
 ): JournalEntry | null => {
-  const normalizedContent = content.trim();
+  const normalizedContent =
+    typeof fieldsOrContent === 'string'
+      ? fieldsOrContent.trim()
+      : fieldsOrContent.content.trim();
 
   if (!normalizedContent) {
     return null;
@@ -140,7 +143,12 @@ export const updateEntry = (
   const updatedEntry: JournalEntry = {
     ...entries[entryIndex],
     content: normalizedContent,
-    title: createTitle(normalizedContent),
+    title:
+      typeof fieldsOrContent === 'string'
+        ? createTitle(normalizedContent)
+        : fieldsOrContent.title === undefined
+          ? entries[entryIndex].title
+          : createTitle(normalizedContent, fieldsOrContent.title),
     updatedAt: new Date().toISOString(),
   };
   const nextEntries = [...entries];

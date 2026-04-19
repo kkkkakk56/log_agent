@@ -36,6 +36,10 @@
   --warn-soft: rgba(209, 69, 59, 0.1);
 
   --success: #2f8f5a;
+  --lab-operation: #2f8f5a;
+  --lab-operation-soft: rgba(47, 143, 90, 0.12);
+  --lab-review: #c54f46;
+  --lab-review-soft: rgba(197, 79, 70, 0.12);
 
   /* Activity heat (calendar) */
   --heat-0: rgba(0, 0, 0, 0.05);
@@ -102,6 +106,10 @@
     --accent: #2a9dff;
     --accent-ink: #58b0ff;
     --accent-soft: rgba(42, 157, 255, 0.18);
+    --lab-operation: #6ec58d;
+    --lab-operation-soft: rgba(110, 197, 141, 0.18);
+    --lab-review: #ff867f;
+    --lab-review-soft: rgba(255, 134, 127, 0.18);
 
     --heat-0: rgba(255, 255, 255, 0.06);
     --heat-1: #284a34;
@@ -133,6 +141,10 @@
   --accent: #2a9dff;
   --accent-ink: #58b0ff;
   --accent-soft: rgba(42, 157, 255, 0.18);
+  --lab-operation: #6ec58d;
+  --lab-operation-soft: rgba(110, 197, 141, 0.18);
+  --lab-review: #ff867f;
+  --lab-review-soft: rgba(255, 134, 127, 0.18);
   --heat-0: rgba(255, 255, 255, 0.06);
   --heat-1: #284a34;
   --heat-2: #4a8e66;
@@ -736,7 +748,8 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 /* ---------- 13. Knowledge park ---------- */
-.knowledge-workspace {
+.knowledge-workspace,
+.lab-workspace {
   position: relative;
   display: grid;
   grid-template-columns: 1fr;
@@ -753,7 +766,8 @@ a { color: var(--accent); text-decoration: none; }
   animation: soft-enter 0.25s var(--motion-ease);
 }
 
-.knowledge-sidebar {
+.knowledge-sidebar,
+.lab-sidebar {
   position: fixed;
   top: 0; left: 0; bottom: 0;
   width: min(86vw, 360px);
@@ -772,7 +786,8 @@ a { color: var(--accent); text-decoration: none; }
   gap: 16px;
   overflow-y: auto;
 }
-.knowledge-sidebar.open { transform: translateX(0); }
+.knowledge-sidebar.open,
+.lab-sidebar.open { transform: translateX(0); }
 
 .knowledge-drawer-heading {
   padding-bottom: 12px;
@@ -844,17 +859,21 @@ a { color: var(--accent); text-decoration: none; }
 }
 .knowledge-description-input { min-height: 80px; }
 
-.knowledge-shell {
+.knowledge-shell,
+.lab-shell {
   display: grid;
   grid-template-columns: 1fr;
   gap: 16px;
 }
 @media (min-width: 820px) {
-  .knowledge-shell { grid-template-columns: 320px 1fr; }
+  .knowledge-shell,
+  .lab-shell { grid-template-columns: 320px 1fr; }
 }
 
 .knowledge-notes-pane,
-.knowledge-inspector {
+.knowledge-inspector,
+.lab-records-pane,
+.lab-inspector {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -906,6 +925,146 @@ a { color: var(--accent); text-decoration: none; }
   border-color: var(--accent);
 }
 .knowledge-note-list-item.active strong { color: var(--accent-ink); }
+
+.lab-record-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line-1);
+  border-left-width: 4px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: all 0.18s var(--motion-ease);
+}
+.lab-record-list-item strong {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--ink-1);
+}
+.lab-record-list-item p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lab-record-list-item small { font-size: 11px; color: var(--ink-4); }
+.lab-record-list-item:hover { border-color: var(--line-strong); }
+.lab-record-list-item.is-operation { border-left-color: var(--lab-operation); }
+.lab-record-list-item.is-review { border-left-color: var(--lab-review); }
+.lab-record-list-item.active.is-operation {
+  background: var(--lab-operation-soft);
+  border-color: color-mix(in srgb, var(--lab-operation) 45%, var(--line-1));
+}
+.lab-record-list-item.active.is-review {
+  background: var(--lab-review-soft);
+  border-color: color-mix(in srgb, var(--lab-review) 45%, var(--line-1));
+}
+.lab-record-list-item.active.is-operation strong { color: var(--lab-operation); }
+.lab-record-list-item.active.is-review strong { color: var(--lab-review); }
+
+.lab-record-list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.record-type-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.record-type-pill.is-operation {
+  color: var(--lab-operation);
+  background: var(--lab-operation-soft);
+  border-color: color-mix(in srgb, var(--lab-operation) 24%, transparent);
+}
+.record-type-pill.is-review {
+  color: var(--lab-review);
+  background: var(--lab-review-soft);
+  border-color: color-mix(in srgb, var(--lab-review) 24%, transparent);
+}
+
+.lab-type-switcher {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 620px) {
+  .lab-type-switcher { grid-template-columns: 1fr 1fr; }
+}
+
+.lab-type-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: all 0.18s var(--motion-ease);
+}
+.lab-type-option strong {
+  font-size: 14px;
+  color: var(--ink-1);
+}
+.lab-type-option span {
+  font-size: 12px;
+  color: var(--ink-4);
+  line-height: 1.5;
+}
+.lab-type-option:hover { border-color: var(--line-strong); }
+.lab-type-option.active.is-operation {
+  background: var(--lab-operation-soft);
+  border-color: color-mix(in srgb, var(--lab-operation) 45%, var(--line-1));
+}
+.lab-type-option.active.is-review {
+  background: var(--lab-review-soft);
+  border-color: color-mix(in srgb, var(--lab-review) 45%, var(--line-1));
+}
+.lab-type-option.active.is-operation strong { color: var(--lab-operation); }
+.lab-type-option.active.is-review strong { color: var(--lab-review); }
+
+.lab-project-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.lab-project-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-md);
+}
+.lab-project-stats strong {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink-1);
+}
+.lab-project-stats span {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.lab-project-description { min-height: 120px; }
 
 .knowledge-note-fab {
   position: absolute;
@@ -1259,7 +1418,8 @@ a { color: var(--accent); text-decoration: none; }
   .hero-panel h1 { font-size: 34px; }
   .hero-content-row { gap: 12px; }
   .compose-card, .tool-card, .park-placeholder,
-  .knowledge-notes-pane, .knowledge-inspector { padding: 18px; }
+  .knowledge-notes-pane, .knowledge-inspector,
+  .lab-records-pane, .lab-inspector { padding: 18px; }
 }
 
 /* ---------- 19. Misc ---------- */

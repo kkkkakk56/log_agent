@@ -35,3 +35,4 @@ journal-agent/ios/App/Pods/
 journal-agent/ios/App/output/
 journal-agent/ios/DerivedData/
 journal-agent/ios/capacitor-cordova-ios-plugins/
+run.sh

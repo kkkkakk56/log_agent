@@ -3,15 +3,18 @@ import { computed, ref } from 'vue';
 import type { CalendarDay } from './utils/date';
 import type { JournalEntry } from './types/journal';
 import type { KnowledgeBase, KnowledgeNote } from './types/knowledge';
+import type { LabProject, LabRecord, LabRecordType } from './types/lab';
 import {
   createAgentMessage,
   getAgentModeLabel,
   getAgentModelLabel,
   isAgentUsingPlaceholder,
   sendAgentMessage,
+  type SendAgentMessageResult,
   type AgentChatMessage,
 } from './services/agentClient';
 import { getJournalRagIndexStatus } from './services/journalRagSearch';
+import { buildRecordAgentContextTool } from './services/recordAgentTool';
 import {
   appendAgentConversationMessage,
   createAgentConversation,
@@ -37,6 +40,16 @@ import {
   updateKnowledgeNote,
 } from './storage/knowledgeStore';
 import {
+  createLabProject,
+  createLabRecord,
+  deleteLabProject,
+  deleteLabRecord,
+  getLabProjects,
+  getLabRecords,
+  updateLabProject,
+  updateLabRecord,
+} from './storage/labStore';
+import {
   WEEKDAY_LABELS,
   addMonths,
   buildCalendarDays,
@@ -58,6 +71,12 @@ type KnowledgeInspectorMode =
   | 'note-view'
   | 'note-edit'
   | 'note-create';
+type LabInspectorMode =
+  | 'project'
+  | 'project-edit'
+  | 'record-view'
+  | 'record-edit'
+  | 'record-create';
 
 interface ParkSummary {
   id: ActivePark;
@@ -67,6 +86,28 @@ interface ParkSummary {
   metricValue: string;
   metricLabel: string;
 }
+
+const LAB_RECORD_TYPE_META: Record<LabRecordType, { label: string }> = {
+  operation: { label: '操作' },
+  review: { label: '复盘' },
+};
+
+const labRecordTypeOptions: Array<{
+  value: LabRecordType;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: 'operation',
+    label: '操作',
+    hint: '适合记录动作、步骤、推进和处理结果',
+  },
+  {
+    value: 'review',
+    label: '复盘',
+    hint: '适合记录判断、反思、结论和下一步',
+  },
+];
 
 function createAgentWelcomeMessage(): AgentChatMessage {
   return createAgentMessage(
@@ -86,6 +127,8 @@ if (initialAgentConversations.length === 0) {
 const entries = ref<JournalEntry[]>(getEntries());
 const knowledgeBases = ref<KnowledgeBase[]>(getKnowledgeBases());
 const knowledgeNotes = ref<KnowledgeNote[]>(getKnowledgeNotes());
+const labProjects = ref<LabProject[]>(getLabProjects());
+const labRecords = ref<LabRecord[]>(getLabRecords());
 const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
 const draftTitle = ref('');
@@ -112,6 +155,26 @@ const editingKnowledgeNoteTitle = ref('');
 const editingKnowledgeNoteContent = ref('');
 const editingKnowledgeNoteSourceUrl = ref('');
 const editingKnowledgeNoteTags = ref('');
+const activeLabProjectId = ref<string | null>(labProjects.value[0]?.id ?? null);
+const labDrawerOpen = ref(labProjects.value.length === 0);
+const labProjectComposerOpen = ref(labProjects.value.length === 0);
+const newLabProjectName = ref('');
+const newLabProjectDescription = ref('');
+const newLabProjectTags = ref('');
+const editingLabProjectName = ref(labProjects.value[0]?.name ?? '');
+const editingLabProjectDescription = ref(labProjects.value[0]?.description ?? '');
+const editingLabProjectTags = ref(labProjects.value[0]?.tags.join('，') ?? '');
+const selectedLabRecordId = ref<string | null>(null);
+const labInspectorMode = ref<LabInspectorMode>('project');
+const newLabRecordTitle = ref('');
+const newLabRecordContent = ref('');
+const newLabRecordType = ref<LabRecordType>('operation');
+const newLabRecordTags = ref('');
+const editingLabRecordId = ref<string | null>(null);
+const editingLabRecordTitle = ref('');
+const editingLabRecordContent = ref('');
+const editingLabRecordType = ref<LabRecordType>('operation');
+const editingLabRecordTags = ref('');
 const searchQuery = ref('');
 const calendarMonth = ref(startOfMonth(new Date()));
 const selectedDateKey = ref(getLocalDateKey(new Date()));
@@ -165,6 +228,27 @@ const selectedKnowledgeNote = computed(
       (note) => note.id === selectedKnowledgeNoteId.value,
     ) ?? null,
 );
+const activeLabProject = computed(
+  () =>
+    labProjects.value.find((project) => project.id === activeLabProjectId.value) ??
+    null,
+);
+
+const activeLabRecords = computed(() => {
+  const projectId = activeLabProject.value?.id;
+
+  if (!projectId) {
+    return [];
+  }
+
+  return labRecords.value.filter((record) => record.projectId === projectId);
+});
+
+const selectedLabRecord = computed(
+  () =>
+    activeLabRecords.value.find((record) => record.id === selectedLabRecordId.value) ??
+    null,
+);
 
 const canCreateKnowledgeBase = computed(
   () => newKnowledgeBaseName.value.trim().length > 0,
@@ -183,6 +267,16 @@ const canSaveKnowledgeNote = computed(
   () =>
     Boolean(editingKnowledgeNoteId.value) &&
     editingKnowledgeNoteContent.value.trim().length > 0,
+);
+const canCreateLabProject = computed(() => newLabProjectName.value.trim().length > 0);
+const canSaveLabProject = computed(
+  () => Boolean(activeLabProject.value) && editingLabProjectName.value.trim().length > 0,
+);
+const canCreateLabRecord = computed(
+  () => Boolean(activeLabProject.value) && newLabRecordContent.value.trim().length > 0,
+);
+const canSaveLabRecord = computed(
+  () => Boolean(editingLabRecordId.value) && editingLabRecordContent.value.trim().length > 0,
 );
 
 const parkSummaries = computed<ParkSummary[]>(() => [
@@ -206,9 +300,9 @@ const parkSummaries = computed<ParkSummary[]>(() => [
     id: 'lab',
     label: '做记',
     title: '做记',
-    description: '项目、实验、决策和复盘会在这里聚合。',
-    metricValue: 'Park',
-    metricLabel: '规划',
+    description: '项目操作和阶段复盘会按项目沉淀在这里。',
+    metricValue: String(labProjects.value.length),
+    metricLabel: '项目',
   },
 ]);
 
@@ -237,6 +331,22 @@ const agentJournalContext = computed(() => {
   ragIndexVersion.value;
 
   return getJournalRagIndexStatus(entries.value);
+});
+const agentRecordContext = computed(() => {
+  return buildRecordAgentContextTool(
+    entries.value,
+    knowledgeBases.value,
+    knowledgeNotes.value,
+    labProjects.value,
+    labRecords.value,
+    {
+      activeJournalEntryId: editingId.value,
+      activeKnowledgeBaseId: activeKnowledgeBase.value?.id ?? null,
+      selectedKnowledgeNoteId: selectedKnowledgeNote.value?.id ?? null,
+      activeLabProjectId: activeLabProject.value?.id ?? null,
+      selectedLabRecordId: selectedLabRecord.value?.id ?? null,
+    },
+  );
 });
 const canSendAgentMessage = computed(
   () => agentInput.value.trim().length > 0 && !agentIsThinking.value,
@@ -281,11 +391,15 @@ function refreshEntries() {
   entries.value = getEntries();
 }
 
-function parseKnowledgeTags(rawTags: string): string[] {
+function parseTagInput(rawTags: string): string[] {
   return rawTags
     .split(/[,，、\n]/)
     .map((tag) => tag.trim())
     .filter((tag) => tag.length > 0);
+}
+
+function getLabRecordTypeLabel(type: LabRecordType): string {
+  return LAB_RECORD_TYPE_META[type].label;
 }
 
 function resetNewKnowledgeBaseForm() {
@@ -392,7 +506,7 @@ function saveNewKnowledgeBase() {
   const base = createKnowledgeBase(
     newKnowledgeBaseName.value,
     newKnowledgeBaseDescription.value,
-    parseKnowledgeTags(newKnowledgeBaseTags.value),
+    parseTagInput(newKnowledgeBaseTags.value),
   );
 
   if (!base) {
@@ -433,7 +547,7 @@ function saveKnowledgeBaseDetails() {
   const updatedBase = updateKnowledgeBase(activeKnowledgeBase.value.id, {
     name: editingKnowledgeBaseName.value,
     description: editingKnowledgeBaseDescription.value,
-    tags: parseKnowledgeTags(editingKnowledgeBaseTags.value),
+    tags: parseTagInput(editingKnowledgeBaseTags.value),
   });
 
   if (!updatedBase) {
@@ -481,7 +595,7 @@ function saveNewKnowledgeNote() {
     title: newKnowledgeNoteTitle.value,
     content: newKnowledgeNoteContent.value,
     sourceUrl: newKnowledgeNoteSourceUrl.value,
-    tags: parseKnowledgeTags(newKnowledgeNoteTags.value),
+    tags: parseTagInput(newKnowledgeNoteTags.value),
   });
 
   if (!note) {
@@ -528,7 +642,7 @@ function saveKnowledgeNoteEditing() {
     title: editingKnowledgeNoteTitle.value,
     content: editingKnowledgeNoteContent.value,
     sourceUrl: editingKnowledgeNoteSourceUrl.value,
-    tags: parseKnowledgeTags(editingKnowledgeNoteTags.value),
+    tags: parseTagInput(editingKnowledgeNoteTags.value),
   });
 
   if (!updatedNote) {
@@ -562,6 +676,280 @@ function removeKnowledgeNote(note: KnowledgeNote) {
   refreshKnowledgeData();
 }
 
+function resetNewLabProjectForm() {
+  newLabProjectName.value = '';
+  newLabProjectDescription.value = '';
+  newLabProjectTags.value = '';
+}
+
+function resetLabProjectEditor(project: LabProject | null) {
+  editingLabProjectName.value = project?.name ?? '';
+  editingLabProjectDescription.value = project?.description ?? '';
+  editingLabProjectTags.value = project?.tags.join('，') ?? '';
+}
+
+function resetNewLabRecordForm() {
+  newLabRecordTitle.value = '';
+  newLabRecordContent.value = '';
+  newLabRecordType.value = 'operation';
+  newLabRecordTags.value = '';
+}
+
+function refreshLabData() {
+  labProjects.value = getLabProjects();
+  labRecords.value = getLabRecords();
+
+  if (
+    activeLabProjectId.value &&
+    !labProjects.value.some((project) => project.id === activeLabProjectId.value)
+  ) {
+    activeLabProjectId.value = labProjects.value[0]?.id ?? null;
+  }
+
+  if (!activeLabProjectId.value) {
+    activeLabProjectId.value = labProjects.value[0]?.id ?? null;
+  }
+
+  if (
+    selectedLabRecordId.value &&
+    !activeLabRecords.value.some((record) => record.id === selectedLabRecordId.value)
+  ) {
+    selectedLabRecordId.value = null;
+  }
+
+  if (!activeLabProject.value) {
+    selectedLabRecordId.value = null;
+    labInspectorMode.value = 'project';
+  } else if (
+    (labInspectorMode.value === 'record-view' ||
+      labInspectorMode.value === 'record-edit') &&
+    !selectedLabRecord.value
+  ) {
+    labInspectorMode.value = 'project';
+  }
+
+  if (labProjects.value.length === 0) {
+    labDrawerOpen.value = true;
+    labProjectComposerOpen.value = true;
+  }
+
+  resetLabProjectEditor(activeLabProject.value);
+}
+
+function getLabRecordCount(projectId: string): number {
+  return labRecords.value.filter((record) => record.projectId === projectId).length;
+}
+
+function selectLabProject(projectId: string) {
+  activeLabProjectId.value = projectId;
+  labDrawerOpen.value = false;
+  selectedLabRecordId.value = null;
+  labInspectorMode.value = 'project';
+  resetNewLabRecordForm();
+  cancelLabRecordEditing();
+  resetLabProjectEditor(activeLabProject.value);
+}
+
+function toggleLabDrawer() {
+  labDrawerOpen.value = !labDrawerOpen.value;
+}
+
+function openLabDrawer() {
+  labDrawerOpen.value = true;
+}
+
+function closeLabDrawer() {
+  labDrawerOpen.value = false;
+}
+
+function openLabProjectComposer() {
+  labDrawerOpen.value = true;
+  labProjectComposerOpen.value = true;
+}
+
+function closeLabProjectComposer() {
+  if (labProjects.value.length === 0) {
+    return;
+  }
+
+  labProjectComposerOpen.value = false;
+  resetNewLabProjectForm();
+}
+
+function saveNewLabProject() {
+  const project = createLabProject(
+    newLabProjectName.value,
+    newLabProjectDescription.value,
+    parseTagInput(newLabProjectTags.value),
+  );
+
+  if (!project) {
+    return;
+  }
+
+  activeLabProjectId.value = project.id;
+  labDrawerOpen.value = false;
+  labProjectComposerOpen.value = false;
+  selectedLabRecordId.value = null;
+  labInspectorMode.value = 'project';
+  resetNewLabProjectForm();
+  refreshLabData();
+}
+
+function showLabProjectSummary() {
+  selectedLabRecordId.value = null;
+  labInspectorMode.value = 'project';
+  resetNewLabRecordForm();
+  cancelLabRecordEditing();
+}
+
+function startLabProjectEditing() {
+  if (!activeLabProject.value) {
+    return;
+  }
+
+  selectedLabRecordId.value = null;
+  labInspectorMode.value = 'project-edit';
+  resetLabProjectEditor(activeLabProject.value);
+}
+
+function saveLabProjectDetails() {
+  if (!activeLabProject.value) {
+    return;
+  }
+
+  const updatedProject = updateLabProject(activeLabProject.value.id, {
+    name: editingLabProjectName.value,
+    description: editingLabProjectDescription.value,
+    tags: parseTagInput(editingLabProjectTags.value),
+  });
+
+  if (!updatedProject) {
+    return;
+  }
+
+  activeLabProjectId.value = updatedProject.id;
+  labInspectorMode.value = 'project';
+  refreshLabData();
+}
+
+function removeLabProject(project: LabProject) {
+  const shouldDelete = window.confirm(
+    `确定删除「${project.name}」项目吗？项目下的操作和复盘记录也会一起移除。`,
+  );
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  deleteLabProject(project.id);
+  selectedLabRecordId.value = null;
+  labInspectorMode.value = 'project';
+  cancelLabRecordEditing();
+  refreshLabData();
+}
+
+function startLabRecordComposer() {
+  if (!activeLabProject.value) {
+    return;
+  }
+
+  selectedLabRecordId.value = null;
+  labInspectorMode.value = 'record-create';
+  cancelLabRecordEditing();
+  resetNewLabRecordForm();
+}
+
+function saveNewLabRecord() {
+  if (!activeLabProject.value) {
+    return;
+  }
+
+  const record = createLabRecord(activeLabProject.value.id, {
+    title: newLabRecordTitle.value,
+    content: newLabRecordContent.value,
+    type: newLabRecordType.value,
+    tags: parseTagInput(newLabRecordTags.value),
+  });
+
+  if (!record) {
+    return;
+  }
+
+  selectedLabRecordId.value = record.id;
+  labInspectorMode.value = 'record-view';
+  resetNewLabRecordForm();
+  refreshLabData();
+}
+
+function selectLabRecord(record: LabRecord) {
+  selectedLabRecordId.value = record.id;
+  labInspectorMode.value = 'record-view';
+  resetNewLabRecordForm();
+  cancelLabRecordEditing();
+}
+
+function startLabRecordEditing(record: LabRecord) {
+  selectedLabRecordId.value = record.id;
+  labInspectorMode.value = 'record-edit';
+  editingLabRecordId.value = record.id;
+  editingLabRecordTitle.value = record.title;
+  editingLabRecordContent.value = record.content;
+  editingLabRecordType.value = record.type;
+  editingLabRecordTags.value = record.tags.join('，');
+}
+
+function cancelLabRecordEditing() {
+  editingLabRecordId.value = null;
+  editingLabRecordTitle.value = '';
+  editingLabRecordContent.value = '';
+  editingLabRecordType.value = 'operation';
+  editingLabRecordTags.value = '';
+}
+
+function saveLabRecordEditing() {
+  if (!editingLabRecordId.value) {
+    return;
+  }
+
+  const updatedRecord = updateLabRecord(editingLabRecordId.value, {
+    title: editingLabRecordTitle.value,
+    content: editingLabRecordContent.value,
+    type: editingLabRecordType.value,
+    tags: parseTagInput(editingLabRecordTags.value),
+  });
+
+  if (!updatedRecord) {
+    return;
+  }
+
+  selectedLabRecordId.value = updatedRecord.id;
+  labInspectorMode.value = 'record-view';
+  cancelLabRecordEditing();
+  refreshLabData();
+}
+
+function removeLabRecord(record: LabRecord) {
+  const shouldDelete = window.confirm(`确定删除「${record.title}」这条项目记录吗？`);
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  deleteLabRecord(record.id);
+
+  if (
+    editingLabRecordId.value === record.id ||
+    selectedLabRecordId.value === record.id
+  ) {
+    selectedLabRecordId.value = null;
+    labInspectorMode.value = 'project';
+    cancelLabRecordEditing();
+  }
+
+  refreshLabData();
+}
+
 function refreshAgentConversations() {
   agentConversations.value = getAgentConversations();
 
@@ -586,13 +974,22 @@ function setActivePark(park: ActivePark) {
   activePark.value = park;
   cancelEditing();
   cancelKnowledgeNoteEditing();
+  cancelLabRecordEditing();
 
   if (park !== 'knowledge') {
     knowledgeDrawerOpen.value = false;
   }
 
+  if (park !== 'lab') {
+    labDrawerOpen.value = false;
+  }
+
   if (park === 'knowledge' && activeKnowledgeBase.value && !selectedKnowledgeNote.value) {
     knowledgeInspectorMode.value = 'base';
+  }
+
+  if (park === 'lab' && activeLabProject.value && !selectedLabRecord.value) {
+    labInspectorMode.value = 'project';
   }
 }
 
@@ -742,11 +1139,56 @@ async function submitAgentMessage() {
     const requestConversation = agentConversations.value.find(
       (item) => item.id === conversation.id,
     );
-    const assistantMessage = await sendAgentMessage({
+    const result: SendAgentMessageResult = await sendAgentMessage({
       messages: requestConversation?.messages ?? [userMessage],
       entries: entries.value,
+      knowledgeBases: knowledgeBases.value,
+      knowledgeNotes: knowledgeNotes.value,
+      labProjects: labProjects.value,
+      labRecords: labRecords.value,
+      activeJournalEntryId: editingId.value,
+      activeKnowledgeBaseId: activeKnowledgeBase.value?.id ?? null,
+      selectedKnowledgeNoteId: selectedKnowledgeNote.value?.id ?? null,
+      activeLabProjectId: activeLabProject.value?.id ?? null,
+      selectedLabRecordId: selectedLabRecord.value?.id ?? null,
     });
-    appendAgentConversationMessage(conversation.id, assistantMessage);
+    appendAgentConversationMessage(conversation.id, result.assistantMessage);
+    if (
+      result.mutatedJournalEntryId ||
+      result.mutatedKnowledgeBaseId ||
+      result.mutatedKnowledgeNoteId ||
+      result.mutatedLabProjectId ||
+      result.mutatedLabRecordId
+    ) {
+      refreshEntries();
+      refreshKnowledgeData();
+      refreshLabData();
+
+      if (result.mutationKind === 'journal-entry') {
+        activePark.value = 'journal';
+        activeView.value = 'timeline';
+      }
+
+      if (result.mutatedKnowledgeBaseId) {
+        activeKnowledgeBaseId.value = result.mutatedKnowledgeBaseId;
+      }
+
+      if (result.mutatedKnowledgeNoteId) {
+        activePark.value = 'knowledge';
+        selectedKnowledgeNoteId.value = result.mutatedKnowledgeNoteId;
+        knowledgeInspectorMode.value = 'note-view';
+      }
+
+      if (result.mutatedLabProjectId) {
+        activeLabProjectId.value = result.mutatedLabProjectId;
+      }
+
+      if (result.mutatedLabRecordId) {
+        activePark.value = 'lab';
+        selectedLabRecordId.value = result.mutatedLabRecordId;
+        labInspectorMode.value = 'record-view';
+      }
+    }
     refreshAgentConversations();
   } catch {
     appendAgentConversationMessage(
@@ -768,7 +1210,7 @@ async function submitAgentMessage() {
   <main class="journal-app">
     <section
       class="hero-panel"
-      :class="{ 'knowledge-hero-panel': activePark === 'knowledge' }"
+      :class="{ 'knowledge-hero-panel': activePark === 'knowledge' || activePark === 'lab' }"
       aria-labelledby="app-title"
     >
       <div class="hero-main">
@@ -792,6 +1234,25 @@ async function submitAgentMessage() {
               :aria-expanded="knowledgeDrawerOpen"
               aria-controls="knowledge-drawer"
               @click="toggleKnowledgeDrawer"
+            >
+              <span class="knowledge-drawer-icon" aria-hidden="true">
+                <i></i>
+                <i></i>
+                <i></i>
+              </span>
+            </button>
+            <h1 id="app-title" class="knowledge-page-title">{{ activeParkSummary.title }}</h1>
+          </div>
+        </template>
+
+        <template v-else-if="activePark === 'lab'">
+          <div class="knowledge-hero-title">
+            <button
+              class="icon-button knowledge-drawer-toggle"
+              type="button"
+              :aria-expanded="labDrawerOpen"
+              aria-controls="lab-drawer"
+              @click="toggleLabDrawer"
             >
               <span class="knowledge-drawer-icon" aria-hidden="true">
                 <i></i>
@@ -1476,31 +1937,454 @@ async function submitAgentMessage() {
 
     <section
       v-else-if="activePark === 'lab'"
-      class="park-placeholder"
-      aria-labelledby="lab-park-title"
+      class="lab-workspace"
+      aria-label="做记工作区"
     >
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">后续 Park</p>
-          <h2 id="lab-park-title">项目实验库</h2>
-        </div>
-        <span class="counter">规划中</span>
-      </div>
+      <button
+        v-if="labDrawerOpen"
+        class="knowledge-drawer-backdrop"
+        type="button"
+        aria-label="关闭项目导航"
+        @click="closeLabDrawer"
+      ></button>
 
-      <div class="park-intro">
-        <p>项目进展、实验观察、关键决策和阶段复盘会在这里聚合。</p>
-      </div>
+      <aside
+        id="lab-drawer"
+        class="lab-sidebar"
+        :class="{ open: labDrawerOpen }"
+        aria-label="项目导航"
+      >
+        <div class="section-heading compact knowledge-pane-heading knowledge-drawer-heading">
+          <div>
+            <p class="eyebrow">项目</p>
+            <h2>做记项目</h2>
+          </div>
+          <div class="knowledge-pane-actions">
+            <span class="counter">{{ labProjects.length }} 项</span>
+            <button class="ghost-action" type="button" @click="closeLabDrawer">
+              关闭
+            </button>
+          </div>
+        </div>
 
-      <div class="park-boundary-list" aria-label="项目实验库 Park 边界">
-        <div>
-          <strong>实验进度</strong>
-          <span>按主题持续记录目标、过程、观察、结果和下一步。</span>
+        <div v-if="labProjects.length === 0" class="empty-state knowledge-empty-state">
+          <p>还没有项目。</p>
+          <span>先建一个项目，再把操作过程和复盘记录收进来。</span>
         </div>
-        <div>
-          <strong>项目记录</strong>
-          <span>按项目聚合目标、里程碑、问题、决策和复盘。</span>
+
+        <div v-else class="knowledge-base-list">
+          <button
+            v-for="project in labProjects"
+            :key="project.id"
+            type="button"
+            :class="{ active: project.id === activeLabProjectId }"
+            @click="selectLabProject(project.id)"
+          >
+            <strong>{{ project.name }}</strong>
+            <span>{{ getLabRecordCount(project.id) }} 条记录</span>
+            <small>
+              {{ getDateGroupLabel(project.updatedAt) }} · {{ formatEntryTime(project.updatedAt) }}
+            </small>
+            <small v-if="project.tags.length > 0">{{ project.tags.join(' / ') }}</small>
+          </button>
         </div>
-      </div>
+
+        <div class="knowledge-sidebar-footer">
+          <button
+            v-if="activeLabProject"
+            class="ghost-action knowledge-sidebar-manage"
+            type="button"
+            @click="startLabProjectEditing"
+          >
+            编辑当前项目
+          </button>
+          <button
+            class="ghost-action knowledge-sidebar-add"
+            type="button"
+            @click="openLabProjectComposer"
+          >
+            添加新项目
+          </button>
+        </div>
+
+        <form
+          v-if="labProjectComposerOpen"
+          class="knowledge-base-composer"
+          @submit.prevent="saveNewLabProject"
+        >
+          <input
+            v-model="newLabProjectName"
+            class="title-input"
+            type="text"
+            maxlength="40"
+            placeholder="项目名称，例如：Journal Agent iOS"
+            aria-label="项目名称"
+          />
+          <textarea
+            v-model="newLabProjectDescription"
+            class="journal-input knowledge-description-input"
+            placeholder="这个项目要推进什么？"
+            rows="3"
+          />
+          <input
+            v-model="newLabProjectTags"
+            class="search-input compact-input"
+            type="text"
+            placeholder="标签，可选，用逗号分隔"
+            aria-label="项目标签"
+          />
+          <div class="entry-actions">
+            <button
+              v-if="labProjects.length > 0"
+              class="ghost-action"
+              type="button"
+              @click="closeLabProjectComposer"
+            >
+              取消
+            </button>
+            <button
+              class="primary-action small"
+              type="submit"
+              :disabled="!canCreateLabProject"
+            >
+              保存项目
+            </button>
+          </div>
+        </form>
+      </aside>
+
+      <section class="lab-shell" aria-label="做记项目工作台">
+        <section class="lab-records-pane" aria-labelledby="lab-records-title">
+          <div class="section-heading compact knowledge-pane-heading">
+            <h2 id="lab-records-title">
+              {{ activeLabProject ? activeLabProject.name : '选择项目' }}
+            </h2>
+          </div>
+
+          <div v-if="!activeLabProject" class="empty-state knowledge-empty-state">
+            <p>先从左上角打开项目列表。</p>
+            <span>选中一个项目之后，这里才会显示对应的操作和复盘记录。</span>
+            <button class="ghost-action knowledge-empty-action" type="button" @click="openLabDrawer">
+              打开项目列表
+            </button>
+          </div>
+
+          <div v-else-if="activeLabRecords.length === 0" class="empty-state knowledge-empty-state">
+            <p>这个项目还没有记录。</p>
+            <span>点右下角按钮，先补一条操作或复盘。</span>
+          </div>
+
+          <div v-else class="knowledge-note-items">
+            <button
+              v-for="record in activeLabRecords"
+              :key="record.id"
+              type="button"
+              class="lab-record-list-item"
+              :class="[
+                { active: selectedLabRecordId === record.id },
+                `is-${record.type}`,
+              ]"
+              @click="selectLabRecord(record)"
+            >
+              <div class="lab-record-list-header">
+                <span class="entry-time">
+                  {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
+                </span>
+                <span class="record-type-pill" :class="`is-${record.type}`">
+                  {{ getLabRecordTypeLabel(record.type) }}
+                </span>
+              </div>
+              <strong>{{ record.title }}</strong>
+              <p>{{ record.content }}</p>
+              <small v-if="record.tags.length > 0">{{ record.tags.join(' / ') }}</small>
+            </button>
+          </div>
+
+          <button
+            v-if="activeLabProject"
+            class="knowledge-note-fab"
+            type="button"
+            aria-label="新增项目记录"
+            @click="startLabRecordComposer"
+          >
+            +
+          </button>
+        </section>
+
+        <section class="lab-inspector" aria-labelledby="lab-inspector-title">
+          <template v-if="!activeLabProject">
+            <div class="empty-state knowledge-empty-state">
+              <p>这里会显示项目概览或具体记录。</p>
+              <span>先从左上角打开项目列表，再选一条项目记录。</span>
+            </div>
+          </template>
+
+          <template v-else-if="labInspectorMode === 'record-create'">
+            <div class="section-heading compact knowledge-pane-heading">
+              <div>
+                <p class="eyebrow">新记录</p>
+                <h2 id="lab-inspector-title">写入 {{ activeLabProject.name }}</h2>
+              </div>
+            </div>
+
+            <input
+              v-model="newLabRecordTitle"
+              class="title-input"
+              type="text"
+              maxlength="80"
+              placeholder="标题，可选"
+              aria-label="项目记录标题"
+            />
+
+            <div class="lab-type-switcher" aria-label="选择记录类型">
+              <button
+                v-for="type in labRecordTypeOptions"
+                :key="type.value"
+                type="button"
+                class="lab-type-option"
+                :class="[
+                  { active: newLabRecordType === type.value },
+                  `is-${type.value}`,
+                ]"
+                @click="newLabRecordType = type.value"
+              >
+                <strong>{{ type.label }}</strong>
+                <span>{{ type.hint }}</span>
+              </button>
+            </div>
+
+            <textarea
+              v-model="newLabRecordContent"
+              class="journal-input"
+              placeholder="写下这次做了什么，或者这次复盘看到了什么。"
+              rows="10"
+            />
+            <input
+              v-model="newLabRecordTags"
+              class="search-input compact-input"
+              type="text"
+              placeholder="标签，可选，用逗号分隔"
+              aria-label="项目记录标签"
+            />
+            <div class="entry-actions">
+              <button class="ghost-action" type="button" @click="showLabProjectSummary">
+                取消
+              </button>
+              <button
+                class="primary-action small"
+                type="button"
+                :disabled="!canCreateLabRecord"
+                @click="saveNewLabRecord"
+              >
+                保存记录
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="labInspectorMode === 'record-edit' && selectedLabRecord">
+            <div class="section-heading compact knowledge-pane-heading">
+              <div>
+                <p class="eyebrow">编辑记录</p>
+                <h2 id="lab-inspector-title">{{ selectedLabRecord.title }}</h2>
+              </div>
+            </div>
+
+            <input
+              v-model="editingLabRecordTitle"
+              class="title-input"
+              type="text"
+              maxlength="80"
+              aria-label="编辑项目记录标题"
+            />
+
+            <div class="lab-type-switcher" aria-label="编辑记录类型">
+              <button
+                v-for="type in labRecordTypeOptions"
+                :key="type.value"
+                type="button"
+                class="lab-type-option"
+                :class="[
+                  { active: editingLabRecordType === type.value },
+                  `is-${type.value}`,
+                ]"
+                @click="editingLabRecordType = type.value"
+              >
+                <strong>{{ type.label }}</strong>
+                <span>{{ type.hint }}</span>
+              </button>
+            </div>
+
+            <textarea
+              v-model="editingLabRecordContent"
+              class="journal-input edit-input"
+              rows="10"
+            />
+            <input
+              v-model="editingLabRecordTags"
+              class="search-input compact-input"
+              type="text"
+              placeholder="标签，用逗号分隔"
+              aria-label="编辑项目记录标签"
+            />
+            <div class="entry-actions">
+              <button class="ghost-action" type="button" @click="selectLabRecord(selectedLabRecord)">
+                取消
+              </button>
+              <button
+                class="primary-action small"
+                type="button"
+                :disabled="!canSaveLabRecord"
+                @click="saveLabRecordEditing"
+              >
+                保存修改
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="selectedLabRecord">
+            <div class="section-heading compact knowledge-pane-heading">
+              <div>
+                <p class="eyebrow">记录详情</p>
+                <h2 id="lab-inspector-title">{{ selectedLabRecord.title }}</h2>
+              </div>
+              <span class="counter">{{ selectedLabRecord.content.length }} 字</span>
+            </div>
+
+            <div class="knowledge-meta">
+              <span>
+                更新于
+                {{ getDateGroupLabel(selectedLabRecord.updatedAt) }}
+                ·
+                {{ formatEntryTime(selectedLabRecord.updatedAt) }}
+              </span>
+              <span class="record-type-pill" :class="`is-${selectedLabRecord.type}`">
+                {{ getLabRecordTypeLabel(selectedLabRecord.type) }}
+              </span>
+            </div>
+
+            <div
+              v-if="selectedLabRecord.tags.length > 0"
+              class="tag-row knowledge-detail-tags"
+            >
+              <span v-for="tag in selectedLabRecord.tags" :key="tag">{{ tag }}</span>
+            </div>
+
+            <p class="knowledge-note-content">{{ selectedLabRecord.content }}</p>
+
+            <div class="entry-actions knowledge-detail-actions">
+              <button class="delete-action" type="button" @click="removeLabRecord(selectedLabRecord)">
+                删除
+              </button>
+              <button
+                class="primary-action small"
+                type="button"
+                @click="startLabRecordEditing(selectedLabRecord)"
+              >
+                编辑
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="labInspectorMode === 'project-edit'">
+            <div class="section-heading compact knowledge-pane-heading">
+              <div>
+                <p class="eyebrow">编辑项目</p>
+                <h2 id="lab-inspector-title">{{ activeLabProject.name }}</h2>
+              </div>
+            </div>
+
+            <input
+              v-model="editingLabProjectName"
+              class="title-input"
+              type="text"
+              maxlength="40"
+              aria-label="编辑项目名称"
+            />
+            <textarea
+              v-model="editingLabProjectDescription"
+              class="journal-input knowledge-description-input"
+              placeholder="项目简介，可选"
+              rows="5"
+            />
+            <input
+              v-model="editingLabProjectTags"
+              class="search-input compact-input"
+              type="text"
+              placeholder="标签，用逗号分隔"
+              aria-label="编辑项目标签"
+            />
+            <div class="entry-actions">
+              <button class="delete-action" type="button" @click="removeLabProject(activeLabProject)">
+                删除项目
+              </button>
+              <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="showLabProjectSummary">
+                  取消
+                </button>
+                <button
+                  class="primary-action small"
+                  type="button"
+                  :disabled="!canSaveLabProject"
+                  @click="saveLabProjectDetails"
+                >
+                  保存项目
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="section-heading compact knowledge-pane-heading">
+              <div>
+                <p class="eyebrow">项目概览</p>
+                <h2 id="lab-inspector-title">{{ activeLabProject.name }}</h2>
+              </div>
+              <span class="counter">{{ activeLabRecords.length }} 条</span>
+            </div>
+
+            <div class="knowledge-meta">
+              <span>
+                更新于
+                {{ getDateGroupLabel(activeLabProject.updatedAt) }}
+                ·
+                {{ formatEntryTime(activeLabProject.updatedAt) }}
+              </span>
+              <span>绿色是操作，红色是复盘</span>
+            </div>
+
+            <div class="lab-project-stats">
+              <div>
+                <strong>{{ activeLabRecords.filter((record) => record.type === 'operation').length }}</strong>
+                <span>操作</span>
+              </div>
+              <div>
+                <strong>{{ activeLabRecords.filter((record) => record.type === 'review').length }}</strong>
+                <span>复盘</span>
+              </div>
+            </div>
+
+            <p class="knowledge-note-content lab-project-description">
+              {{ activeLabProject.description || '这个项目还没有简介，你可以先补一句目标或阶段说明。' }}
+            </p>
+
+            <div
+              v-if="activeLabProject.tags.length > 0"
+              class="tag-row knowledge-detail-tags"
+            >
+              <span v-for="tag in activeLabProject.tags" :key="tag">{{ tag }}</span>
+            </div>
+
+            <div class="entry-actions knowledge-detail-actions">
+              <button class="ghost-action" type="button" @click="startLabProjectEditing">
+                编辑项目
+              </button>
+              <button class="primary-action small" type="button" @click="startLabRecordComposer">
+                新增记录
+              </button>
+            </div>
+          </template>
+        </section>
+      </section>
     </section>
 
     <section
@@ -1571,6 +2455,7 @@ async function submitAgentMessage() {
             <h2 id="agent-title">{{ activeAgentConversationTitle }}</h2>
             <span>{{ agentModelLabel }}</span>
             <small>{{ agentJournalContext.statusLabel }}</small>
+            <small>{{ agentRecordContext.statusLabel }}</small>
           </div>
           <div class="agent-header-actions">
             <button class="panel-close" type="button" @click="startNewAgentConversation">
@@ -1616,7 +2501,7 @@ async function submitAgentMessage() {
           <input
             v-model="agentInput"
             type="text"
-            placeholder="问问今天该怎么记录..."
+            placeholder="问问今天该怎么整理，或让 Agent 帮你写三记..."
             aria-label="输入给 Agent 的消息"
           />
           <button type="submit" :disabled="!canSendAgentMessage">发送</button>

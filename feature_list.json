@@ -466,23 +466,46 @@
       "id": "TASK-020",
       "featureId": "F024",
       "category": "feature",
-      "description": "项目实验库里的项目记录：按项目聚合目标、进展、决策、问题和阶段性复盘",
-      "status": "planned",
+      "description": "做记 Park 项目记录：按项目聚合操作与复盘，并用颜色类型标记区分记录",
+      "status": "done",
       "priority": 9,
       "dependsOn": [
         "F021"
       ],
       "steps": [
-        "用户可以从项目实验库 Park 进入项目记录",
-        "用户可以创建一个项目记录空间",
-        "项目包含目标、状态、里程碑、相关链接和标签",
-        "项目下可以追加进展记录、决策记录、问题记录和复盘记录",
-        "项目列表展示当前状态、最近更新和记录数量",
-        "支持从项目维度搜索相关记录"
+        "用户可以从做记 Park 进入项目记录工作区",
+        "项目列表采用和知识库类似的隐藏侧边抽屉，不常驻占用主内容区",
+        "用户可以创建一个项目，项目包含名称、简介、标签和更新时间",
+        "项目下可以追加两类记录：操作和复盘",
+        "新增或编辑项目记录时，用户可以在操作与复盘之间二选一",
+        "列表和详情中通过颜色标记区分类型：操作偏绿色，复盘偏红色",
+        "项目列表展示最近更新和记录数量"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。第一版做记 Park 采用项目维度组织，交互结构沿用知识库抽屉式导航；项目记录暂聚焦两种类型：操作与复盘，并在列表、详情、编辑态中保持统一的颜色标记。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "TASK-025",
+      "featureId": "F029",
+      "category": "feature",
+      "description": "做记仓库目标卡片：为每个仓库新增目标卡片来存放目标清单，并在完成时提供可交互动效",
+      "status": "planned",
+      "priority": 10,
+      "dependsOn": [
+        "F024"
+      ],
+      "steps": [
+        "在每个做记仓库的主内容区新增一个目标卡片，用来集中展示该仓库的目标清单",
+        "目标卡片支持新增、编辑、删除目标项，并展示当前完成进度",
+        "用户可以勾选目标完成或取消完成，已完成目标有清晰的视觉区分",
+        "勾选完成时提供轻量、可交互的完成动效，例如打勾、划线、缩放或反馈高亮",
+        "系统开启减少动态效果时，动效自动降级为更克制的反馈",
+        "目标清单只归属当前仓库，不和其他做记仓库的数据混在一起"
       ],
       "passes": false,
-      "verify_cmd": "cd journal-agent && npm run build",
-      "notes": "适合长期项目、学习计划、开发任务或个人事务管理；归属在项目实验库 Park。"
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "第一版先做轻量 checklist 卡片，不引入复杂项目管理结构；如果后续需要，再扩展优先级、截止日期、分组或排序。"
     },
     {
       "id": "TASK-021",
@@ -507,6 +530,51 @@
       "passes": false,
       "verify_cmd": "cd journal-agent && npm run build && npm run test:agent-api",
       "notes": "这是知识库和项目记录真正变成个人资料库后的 Agent 增强任务。"
+    },
+    {
+      "id": "TASK-023",
+      "featureId": "F027",
+      "category": "feature",
+      "description": "共同 Workspace 与权限控制：支持邀请他人加入共享 workspace，并只允许有权限的成员操作其中内容",
+      "status": "planned",
+      "priority": 16,
+      "dependsOn": [
+        "F021"
+      ],
+      "steps": [
+        "定义 workspace、成员和角色模型，至少覆盖 owner、editor、viewer 等权限层级",
+        "支持创建共同 workspace，并邀请其他成员加入",
+        "只有有权限的成员才能查看、新增、编辑、删除或管理该 workspace 内的内容",
+        "支持管理成员列表、调整权限和移除成员",
+        "搜索、Agent 读取和内容操作都遵守 workspace 权限边界",
+        "个人空间与共同 workspace 的数据归属清晰分离，不相互混淆"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "这是协作能力的入口。正式实现前需要明确账号体系、邀请链路、同步/后端方案，以及权限校验放在客户端还是服务端。"
+    },
+    {
+      "id": "TASK-024",
+      "featureId": "F028",
+      "category": "feature",
+      "description": "Agent 三记写入工具：允许 Agent 在受限协议下新增或编辑心记、笔记和做记记录，但不提供删除能力",
+      "status": "done",
+      "priority": 10,
+      "dependsOn": [
+        "F015",
+        "F026"
+      ],
+      "steps": [
+        "Agent 在请求中读取心记、知识库笔记、做记项目和当前选中记录上下文",
+        "受限工具协议只允许 journal.entry.create/update、knowledge.note.create/update、lab.record.create/update",
+        "当用户明确要求新增或编辑三记内容时，Agent 输出 tool_call，客户端本地执行写入",
+        "工具执行完成后，把 tool_result 回传给 Agent，让它向用户确认执行结果",
+        "禁止任何删除相关能力，不暴露删除工具，也在提示词中明确禁止删除承诺",
+        "三记写入成功后刷新对应 Park，并选中最新创建或编辑的内容"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npm run test:agent-api",
+      "notes": "已完成。当前实现沿用文本协议 tool_call / tool_result，而不是依赖某一家模型供应商的原生 tool calling；可新增或编辑心记、知识笔记和做记记录，不能删除。验证通过：npm run build，npm run test:agent-api，npx cap sync ios。"
     }
   ],
   "features": [
@@ -985,24 +1053,51 @@
     {
       "id": "F024",
       "title": "项目记录",
-      "status": "planned",
+      "status": "done",
       "priority": 9,
       "phase": "M3-record-hub",
-      "summary": "在项目实验库 Park 下，按项目聚合目标、进展、决策、问题和阶段性复盘。",
+      "summary": "在做记 Park 下，按项目沉淀操作与复盘记录，并通过颜色标记快速区分记录类型。",
       "dependsOn": [
         "F021"
       ],
       "acceptanceCriteria": [
         "用户可以创建一个项目记录空间。",
-        "项目包含目标、状态、里程碑、相关链接和标签。",
-        "项目下可以追加进展记录、决策记录、问题记录和复盘记录。",
-        "项目列表展示当前状态、最近更新和记录数量。",
-        "搜索可以从项目维度找到相关记录。"
+        "做记 Park 左上角有导航图标，点击后才展开项目侧边抽屉。",
+        "项目包含名称、简介、标签和更新时间。",
+        "项目下可以追加两类记录：操作与复盘。",
+        "新增或编辑记录时，用户可以明确选择操作或复盘。",
+        "列表和详情里会用绿色和红色的类型标记区分记录。",
+        "项目列表展示最近更新和记录数量。"
       ],
       "verification": [
-        "npm run build"
+        "npm run build",
+        "npx cap sync ios"
       ],
-      "notes": "和实验记录的区别：项目更关注目标推进、决策和阶段性复盘。"
+      "notes": "已完成。当前版本把项目记录先收敛为操作 / 复盘两类，适合开发任务、学习推进和个人事务项目；后续如果需要，再在做记 Park 下扩展更多结构化类型。"
+    },
+    {
+      "id": "F029",
+      "title": "做记仓库目标卡片与完成动效",
+      "status": "planned",
+      "priority": 10,
+      "phase": "M3-record-hub",
+      "summary": "为每个做记仓库新增目标卡片来集中管理目标清单，并在勾选完成时提供可交互的完成动效。",
+      "dependsOn": [
+        "F024"
+      ],
+      "acceptanceCriteria": [
+        "每个做记仓库都有独立的目标卡片，用于展示该仓库的目标清单。",
+        "用户可以新增、编辑、删除目标项，并看到当前完成进度。",
+        "目标项支持勾选完成和取消完成，完成状态有清晰的视觉区分。",
+        "勾选完成时有轻量、可交互的完成动效，增强反馈但不显得喧宾夺主。",
+        "系统开启减少动态效果时，完成动效会自动降级。",
+        "目标清单只归属当前仓库，不和其他做记仓库混淆。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "第一版优先做清晰、顺手的目标 checklist 卡片，不急着上复杂看板或任务系统。"
     },
     {
       "id": "F025",
@@ -1029,6 +1124,55 @@
         "npm run test:agent-api"
       ],
       "notes": "避免把个人日志、知识笔记和项目事实混在一起；来源类型要成为检索结果的一部分。"
+    },
+    {
+      "id": "F027",
+      "title": "共同 Workspace 与权限控制",
+      "status": "planned",
+      "priority": 16,
+      "phase": "M5-collaboration",
+      "summary": "支持和他人共享一个 workspace，并通过成员权限控制谁可以查看、编辑、删除和管理其中内容。",
+      "dependsOn": [
+        "F021"
+      ],
+      "acceptanceCriteria": [
+        "用户可以创建一个可邀请他人的共同 workspace。",
+        "workspace 至少支持 owner、editor、viewer 等角色区分。",
+        "只有有权限的成员才能查看、新增、编辑、删除或管理该 workspace 内的内容。",
+        "成员列表可以管理；移除成员或降权后，对应访问权限立即失效。",
+        "搜索、Agent 读取和内容操作都遵守 workspace 权限边界，不把无权内容暴露给其他人。"
+      ],
+      "verification": [
+        "npm run build",
+        "邀请、查看、编辑、权限变更场景的手动验证"
+      ],
+      "notes": "实现前需要进一步确定账号体系、邀请机制和同步/后端方案；如果最终使用云端协作，真正的权限校验应落在服务端。"
+    },
+    {
+      "id": "F028",
+      "title": "Agent 三记写入工具",
+      "status": "done",
+      "priority": 10,
+      "phase": "M3-agent-memory",
+      "summary": "允许 Agent 在受限协议下新增或编辑心记、知识笔记和做记记录，并把执行结果回流到对话里确认，但不开放删除能力。",
+      "dependsOn": [
+        "F015",
+        "F026"
+      ],
+      "acceptanceCriteria": [
+        "Agent 可以读取心记、知识库、知识笔记、做记项目和做记记录上下文。",
+        "当用户明确要求新增心记、笔记或做记时，Agent 可以发起 journal.entry.create、knowledge.note.create 或 lab.record.create。",
+        "当用户明确要求编辑心记、笔记或做记时，Agent 可以发起 journal.entry.update、knowledge.note.update 或 lab.record.update。",
+        "新增和编辑都由客户端本地执行，然后把 tool_result 回传给 Agent 生成确认回复。",
+        "工具层不暴露任何删除能力，也不允许 Agent 承诺已经删除三记内容。",
+        "成功写入后，对应 Park 可以刷新并看到最新内容。"
+      ],
+      "verification": [
+        "npm run build",
+        "npm run test:agent-api",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。实现采用 provider-agnostic 的文本工具协议：模型输出 tool_call，客户端本地执行新增/编辑，再把 tool_result 交还给模型生成最终回复；这样不强依赖某一家 API 的原生 function calling。"
     },
     {
       "id": "F009",
