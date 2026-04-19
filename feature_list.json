@@ -396,7 +396,7 @@
       "featureId": "F022",
       "category": "feature",
       "description": "知识库 Park 与知识笔记：用户可以进入独立知识库区域，创建学习库，并在每个知识库下持续追加知识记录",
-      "status": "ready",
+      "status": "done",
       "priority": 7,
       "dependsOn": [
         "F021"
@@ -411,9 +411,9 @@
         "知识库列表展示每个库的记录数量和最近更新时间",
         "日记区不会展示知识笔记，知识库区也不会展示普通日记"
       ],
-      "passes": false,
+      "passes": true,
       "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
-      "notes": "用户描述的核心体验：先进入知识库 Park，开一个关于 GitHub 的学习库，再在该库下持续增加 GitHub 相关知识记录。"
+      "notes": "已完成。知识库 Park 现在支持创建、选择、编辑和删除学习库；可在当前知识库下新增、编辑、删除知识记录；知识库数据使用独立 localStorage key，不混入日记区。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "TASK-019",
@@ -886,7 +886,7 @@
     {
       "id": "F022",
       "title": "知识库 Park 与知识笔记",
-      "status": "ready",
+      "status": "done",
       "priority": 7,
       "phase": "M3-record-hub",
       "summary": "用户可以进入独立知识库区域，按知识库或学习库分类，例如创建“GitHub 学习库”，并在该库下持续追加知识记录。",
@@ -907,7 +907,7 @@
         "npm run build",
         "npx cap sync ios"
       ],
-      "notes": "用户给出的典型场景：进入知识库 Park，开一个 GitHub 知识学习库，然后不断把 GitHub 相关知识点追加进去。"
+      "notes": "已完成。知识库 Park 现在支持创建、选择、编辑和删除学习库；可在库下新增、编辑、删除知识记录；数据与日记 localStorage 分离。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "F023",

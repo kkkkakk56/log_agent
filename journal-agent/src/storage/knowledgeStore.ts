@@ -1,0 +1,332 @@
+import type { KnowledgeBase, KnowledgeNote } from '../types/knowledge';
+
+const BASES_STORAGE_KEY = 'journal-agent.knowledge.bases.v1';
+const NOTES_STORAGE_KEY = 'journal-agent.knowledge.notes.v1';
+const MAX_BASE_NAME_LENGTH = 40;
+const MAX_NOTE_TITLE_LENGTH = 80;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+const normalizeTags = (tags: string[]): string[] =>
+  Array.from(
+    new Set(
+      tags
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0)
+        .map((tag) => tag.slice(0, 24)),
+    ),
+  ).slice(0, 12);
+
+const isKnowledgeBase = (value: unknown): value is KnowledgeBase =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.name === 'string' &&
+  typeof value.description === 'string' &&
+  isStringArray(value.tags) &&
+  typeof value.createdAt === 'string' &&
+  typeof value.updatedAt === 'string' &&
+  (typeof value.deletedAt === 'string' || value.deletedAt === null);
+
+const isKnowledgeNote = (value: unknown): value is KnowledgeNote =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.baseId === 'string' &&
+  typeof value.title === 'string' &&
+  typeof value.content === 'string' &&
+  typeof value.sourceUrl === 'string' &&
+  isStringArray(value.tags) &&
+  typeof value.createdAt === 'string' &&
+  typeof value.updatedAt === 'string' &&
+  (typeof value.deletedAt === 'string' || value.deletedAt === null);
+
+const createId = (prefix: string): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const readCollection = <T>(
+  storageKey: string,
+  guard: (value: unknown) => value is T,
+): T[] => {
+  try {
+    const rawItems = localStorage.getItem(storageKey);
+
+    if (!rawItems) {
+      return [];
+    }
+
+    const parsedItems: unknown = JSON.parse(rawItems);
+
+    if (!Array.isArray(parsedItems)) {
+      return [];
+    }
+
+    return parsedItems.filter(guard);
+  } catch {
+    return [];
+  }
+};
+
+const writeCollection = <T>(storageKey: string, items: T[]): boolean => {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(items));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const readBases = (): KnowledgeBase[] =>
+  readCollection(BASES_STORAGE_KEY, isKnowledgeBase);
+
+const writeBases = (bases: KnowledgeBase[]): boolean =>
+  writeCollection(BASES_STORAGE_KEY, bases);
+
+const readNotes = (): KnowledgeNote[] =>
+  readCollection(NOTES_STORAGE_KEY, isKnowledgeNote);
+
+const writeNotes = (notes: KnowledgeNote[]): boolean =>
+  writeCollection(NOTES_STORAGE_KEY, notes);
+
+const sortByUpdatedAtDesc = <T extends { updatedAt: string }>(items: T[]): T[] =>
+  items.sort(
+    (firstItem, secondItem) =>
+      new Date(secondItem.updatedAt).getTime() -
+      new Date(firstItem.updatedAt).getTime(),
+  );
+
+const createNoteTitle = (content: string, title = ''): string => {
+  const normalizedTitle = title.trim();
+
+  if (normalizedTitle) {
+    return normalizedTitle.slice(0, MAX_NOTE_TITLE_LENGTH);
+  }
+
+  const firstLine = content.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
+  const titleSource = firstLine || '未命名知识';
+
+  return titleSource.slice(0, MAX_NOTE_TITLE_LENGTH);
+};
+
+const touchKnowledgeBase = (baseId: string, updatedAt: string): void => {
+  const bases = readBases();
+  const baseIndex = bases.findIndex(
+    (base) => base.id === baseId && base.deletedAt === null,
+  );
+
+  if (baseIndex === -1) {
+    return;
+  }
+
+  const nextBases = [...bases];
+  nextBases[baseIndex] = {
+    ...nextBases[baseIndex],
+    updatedAt,
+  };
+
+  writeBases(nextBases);
+};
+
+export const getKnowledgeBases = (): KnowledgeBase[] =>
+  sortByUpdatedAtDesc(
+    readBases().filter((base) => base.deletedAt === null),
+  );
+
+export const getKnowledgeNotes = (baseId?: string): KnowledgeNote[] =>
+  sortByUpdatedAtDesc(
+    readNotes().filter(
+      (note) =>
+        note.deletedAt === null &&
+        (!baseId || note.baseId === baseId),
+    ),
+  );
+
+export const createKnowledgeBase = (
+  name: string,
+  description = '',
+  tags: string[] = [],
+): KnowledgeBase | null => {
+  const normalizedName = name.trim().slice(0, MAX_BASE_NAME_LENGTH);
+
+  if (!normalizedName) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const base: KnowledgeBase = {
+    id: createId('knowledge-base'),
+    name: normalizedName,
+    description: description.trim(),
+    tags: normalizeTags(tags),
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+
+  return writeBases([...readBases(), base]) ? base : null;
+};
+
+export const updateKnowledgeBase = (
+  id: string,
+  fields: Pick<KnowledgeBase, 'name' | 'description' | 'tags'>,
+): KnowledgeBase | null => {
+  const normalizedName = fields.name.trim().slice(0, MAX_BASE_NAME_LENGTH);
+
+  if (!normalizedName) {
+    return null;
+  }
+
+  const bases = readBases();
+  const baseIndex = bases.findIndex(
+    (base) => base.id === id && base.deletedAt === null,
+  );
+
+  if (baseIndex === -1) {
+    return null;
+  }
+
+  const updatedBase: KnowledgeBase = {
+    ...bases[baseIndex],
+    name: normalizedName,
+    description: fields.description.trim(),
+    tags: normalizeTags(fields.tags),
+    updatedAt: new Date().toISOString(),
+  };
+  const nextBases = [...bases];
+  nextBases[baseIndex] = updatedBase;
+
+  return writeBases(nextBases) ? updatedBase : null;
+};
+
+export const deleteKnowledgeBase = (id: string): void => {
+  const now = new Date().toISOString();
+  const bases = readBases();
+  const baseIndex = bases.findIndex(
+    (base) => base.id === id && base.deletedAt === null,
+  );
+
+  if (baseIndex === -1) {
+    return;
+  }
+
+  const nextBases = [...bases];
+  nextBases[baseIndex] = {
+    ...nextBases[baseIndex],
+    deletedAt: now,
+    updatedAt: now,
+  };
+
+  const nextNotes = readNotes().map((note) =>
+    note.baseId === id && note.deletedAt === null
+      ? {
+          ...note,
+          deletedAt: now,
+          updatedAt: now,
+        }
+      : note,
+  );
+
+  writeBases(nextBases);
+  writeNotes(nextNotes);
+};
+
+export const createKnowledgeNote = (
+  baseId: string,
+  fields: Pick<KnowledgeNote, 'title' | 'content' | 'sourceUrl' | 'tags'>,
+): KnowledgeNote | null => {
+  const activeBase = getKnowledgeBases().find((base) => base.id === baseId);
+  const normalizedContent = fields.content.trim();
+
+  if (!activeBase || !normalizedContent) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const note: KnowledgeNote = {
+    id: createId('knowledge-note'),
+    baseId,
+    title: createNoteTitle(normalizedContent, fields.title),
+    content: normalizedContent,
+    sourceUrl: fields.sourceUrl.trim(),
+    tags: normalizeTags(fields.tags),
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+
+  if (!writeNotes([...readNotes(), note])) {
+    return null;
+  }
+
+  touchKnowledgeBase(baseId, now);
+
+  return note;
+};
+
+export const updateKnowledgeNote = (
+  id: string,
+  fields: Pick<KnowledgeNote, 'title' | 'content' | 'sourceUrl' | 'tags'>,
+): KnowledgeNote | null => {
+  const normalizedContent = fields.content.trim();
+
+  if (!normalizedContent) {
+    return null;
+  }
+
+  const notes = readNotes();
+  const noteIndex = notes.findIndex(
+    (note) => note.id === id && note.deletedAt === null,
+  );
+
+  if (noteIndex === -1) {
+    return null;
+  }
+
+  const updatedNote: KnowledgeNote = {
+    ...notes[noteIndex],
+    title: createNoteTitle(normalizedContent, fields.title),
+    content: normalizedContent,
+    sourceUrl: fields.sourceUrl.trim(),
+    tags: normalizeTags(fields.tags),
+    updatedAt: new Date().toISOString(),
+  };
+  const nextNotes = [...notes];
+  nextNotes[noteIndex] = updatedNote;
+
+  if (!writeNotes(nextNotes)) {
+    return null;
+  }
+
+  touchKnowledgeBase(updatedNote.baseId, updatedNote.updatedAt);
+
+  return updatedNote;
+};
+
+export const deleteKnowledgeNote = (id: string): void => {
+  const notes = readNotes();
+  const noteIndex = notes.findIndex(
+    (note) => note.id === id && note.deletedAt === null,
+  );
+
+  if (noteIndex === -1) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const nextNotes = [...notes];
+  nextNotes[noteIndex] = {
+    ...nextNotes[noteIndex],
+    deletedAt: now,
+    updatedAt: now,
+  };
+
+  writeNotes(nextNotes);
+  touchKnowledgeBase(nextNotes[noteIndex].baseId, now);
+};

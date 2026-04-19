@@ -304,6 +304,140 @@ h3 {
   animation: soft-enter 320ms var(--motion-spring) both;
 }
 
+.knowledge-workspace {
+  display: grid;
+  width: min(100%, 920px);
+  gap: 14px;
+  margin: 0 auto;
+  animation: soft-enter 320ms var(--motion-spring) both;
+}
+
+.knowledge-workspace .tool-card {
+  width: 100%;
+}
+
+.knowledge-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.78fr) minmax(0, 1.42fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.knowledge-sidebar,
+.knowledge-detail {
+  min-width: 0;
+}
+
+.knowledge-description-input {
+  min-height: 92px;
+}
+
+.compact-input {
+  height: 44px;
+  margin-bottom: 10px;
+}
+
+.knowledge-base-list,
+.knowledge-note-items {
+  display: grid;
+  gap: 10px;
+}
+
+.knowledge-base-list button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  border: 1px solid rgba(60, 60, 67, 0.08);
+  border-radius: 18px;
+  padding: 13px;
+  background: rgba(242, 242, 247, 0.64);
+  color: #1d1d1f;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 220ms var(--motion-ease),
+    border-color 220ms var(--motion-ease),
+    color 220ms var(--motion-ease),
+    transform 190ms var(--motion-press);
+  will-change: transform;
+}
+
+.knowledge-base-list button.active {
+  border-color: rgba(29, 29, 31, 0.18);
+  background: #1d1d1f;
+  color: #fff;
+}
+
+.knowledge-base-list button:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.knowledge-base-list strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 780;
+  line-height: 1.25;
+}
+
+.knowledge-base-list span,
+.knowledge-base-list small {
+  color: #86868b;
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.knowledge-base-list button.active span,
+.knowledge-base-list button.active small {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.knowledge-edit-panel,
+.knowledge-note-composer,
+.knowledge-note-list {
+  padding-top: 16px;
+  border-top: 1px solid rgba(60, 60, 67, 0.1);
+}
+
+.knowledge-edit-panel {
+  margin-top: 2px;
+}
+
+.knowledge-note-composer,
+.knowledge-note-list {
+  margin-top: 18px;
+}
+
+.knowledge-note-card .search-input {
+  margin-top: 10px;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.tag-row span {
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: rgba(0, 122, 255, 0.1);
+  color: #0057b7;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.source-link {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 12px;
+  color: #007aff;
+  font-size: 13px;
+  font-weight: 760;
+  text-decoration: none;
+}
+
 .view-switcher {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1220,6 +1354,7 @@ h3 {
 @media (hover: hover) {
   .icon-button:hover,
   .park-switcher button:hover,
+  .knowledge-base-list button:hover,
   .ghost-action:hover,
   .month-action:hover,
   .panel-close:hover,
@@ -1229,6 +1364,10 @@ h3 {
   }
 
   .park-switcher button.active:hover {
+    background: #1d1d1f;
+  }
+
+  .knowledge-base-list button.active:hover {
     background: #1d1d1f;
   }
 
@@ -1305,6 +1444,10 @@ h3 {
   .park-switcher button {
     min-height: 58px;
     border-radius: 16px;
+  }
+
+  .knowledge-layout {
+    grid-template-columns: 1fr;
   }
 
   .compose-card,
