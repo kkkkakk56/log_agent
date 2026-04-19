@@ -58,6 +58,7 @@ if (initialAgentConversations.length === 0) {
 
 const entries = ref<JournalEntry[]>(getEntries());
 const activeView = ref<ActiveView>('timeline');
+const draftTitle = ref('');
 const draftContent = ref('');
 const editingId = ref<string | null>(null);
 const editingContent = ref('');
@@ -176,12 +177,13 @@ function setActiveView(view: ActiveView) {
 }
 
 function saveDraft() {
-  const entry = createEntry(draftContent.value);
+  const entry = createEntry(draftContent.value, draftTitle.value);
 
   if (!entry) {
     return;
   }
 
+  draftTitle.value = '';
   draftContent.value = '';
   refreshEntries();
 }
@@ -398,10 +400,14 @@ async function submitAgentMessage() {
         <span class="counter">{{ draftCharacterCount }} 字</span>
       </div>
 
-      <div class="prompt-card">
-        <span>写作提示</span>
-        <p>把今天最值得保存的一个瞬间写下来，不需要完整，只要真实。</p>
-      </div>
+      <input
+        v-model="draftTitle"
+        class="title-input"
+        type="text"
+        maxlength="18"
+        placeholder="标题，可选"
+        aria-label="日志标题"
+      />
 
       <textarea
         v-model="draftContent"
