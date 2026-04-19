@@ -264,6 +264,27 @@
       "notes": "已完成。直接进入第三阶段 embedding RAG。真实 API 模式下，日志 chunk 会发送给 embedding 服务生成向量；聊天时只发送 topK 命中片段给模型。参考 CC prompt 的工具协议思想，但不复制专有系统 prompt。验证通过：npm run build，npm run test:agent-api，npx cap sync ios。"
     },
     {
+      "id": "TASK-015",
+      "featureId": "F019",
+      "category": "feature",
+      "description": "日志自定义标题：移除写作提示卡片，在记录框上方增加可选标题输入行",
+      "status": "done",
+      "priority": 8,
+      "dependsOn": [
+        "F002"
+      ],
+      "steps": [
+        "移除时间线记录区的写作提示卡片",
+        "在正文输入框上方增加一行可选标题输入",
+        "保存日志时优先使用用户输入的标题",
+        "未输入标题时继续根据正文自动生成标题",
+        "保存成功后同时清空标题和正文草稿"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。标题最大 18 字，保持和现有标题生成长度一致。"
+    },
+    {
       "id": "TASK-006",
       "featureId": "F006",
       "category": "feature",
@@ -590,6 +611,29 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。直接实现第三阶段 embedding RAG；保留关键词兜底以提高稳定性。"
+    },
+    {
+      "id": "F019",
+      "title": "日志自定义标题",
+      "status": "done",
+      "priority": 8,
+      "phase": "M2-local-journal",
+      "summary": "移除写作提示卡片，在记录框上方增加可选标题输入行，用户可以自己拟标题。",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "时间线记录区不再展示写作提示卡片。",
+        "正文输入框上方有一行可选标题输入。",
+        "保存日志时优先使用用户输入的标题。",
+        "未输入标题时继续根据正文自动生成标题。",
+        "保存成功后标题和正文都会清空。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。标题最大 18 字，保持和现有标题生成长度一致。"
     },
     {
       "id": "F006",

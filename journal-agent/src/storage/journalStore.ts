@@ -66,7 +66,13 @@ const createId = (): string => {
   return `entry-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-const createTitle = (content: string): string => {
+const createTitle = (content: string, title = ''): string => {
+  const normalizedTitle = title.trim();
+
+  if (normalizedTitle) {
+    return normalizedTitle.slice(0, MAX_TITLE_LENGTH);
+  }
+
   const normalizedContent = content.trim();
   const firstLine = normalizedContent.split(/\r?\n/, 1)[0]?.trim() ?? '';
   const titleSource = firstLine || normalizedContent;
@@ -86,7 +92,10 @@ export const getEntries = (): JournalEntry[] =>
     readEntries().filter((entry) => entry.deletedAt === null),
   );
 
-export const createEntry = (content: string): JournalEntry | null => {
+export const createEntry = (
+  content: string,
+  title = '',
+): JournalEntry | null => {
   const normalizedContent = content.trim();
 
   if (!normalizedContent) {
@@ -96,7 +105,7 @@ export const createEntry = (content: string): JournalEntry | null => {
   const now = new Date().toISOString();
   const entry: JournalEntry = {
     id: createId(),
-    title: createTitle(normalizedContent),
+    title: createTitle(normalizedContent, title),
     content: normalizedContent,
     createdAt: now,
     updatedAt: now,
