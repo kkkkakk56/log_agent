@@ -148,6 +148,7 @@ Codex 会优先读取这些任务卡：
 |---|---|---|---|
 | `TASK-013` | `ready` | Agent 多对话与存储：支持打开新对话，并把不同对话的消息记录持久化保存 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-005` | `ready` | 草稿自动保存：未提交的日志内容在刷新、关闭或切后台后可以恢复 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-014` | `planned` | Agent 检索式日志访问：使用 RAG / 搜索工具检索相关日志，而不是把所有日志一次性输入给模型 | `cd journal-agent && npm run build && npm run test:agent-api` |
 | `TASK-006` | `planned` | 本地数据导出：把日志导出为 JSON 和 Markdown，便于备份 | `cd journal-agent && npm run build` |
 | `TASK-007` | `planned` | 心情与标签：日志支持 mood 和 tags，并在列表、搜索、日历中展示 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-008` | `planned` | 搜索体验优化：高亮关键词、清空查询、显示命中片段 | `cd journal-agent && npm run build` |
@@ -336,6 +337,30 @@ Codex 会优先读取这些任务卡：
 - 草稿存储与正式日志存储分离。
 
 ## 已计划
+
+### F018：Agent 检索式日志访问 / RAG
+
+状态：`planned`
+
+让 Agent 通过检索工具查找相关日志片段，而不是把全部日志或大量最近日志一次性输入给模型。
+
+验收标准：
+
+- 存在 `journal.search` 工具契约，支持 `query`、`limit`、`dateRange`、`tags`、`mood` 等输入。
+- 检索结果包含 `entryId`、`title`、`createdAt`、`excerpt`、`score` 和 `matchReason`。
+- Agent 默认只把 topK 命中片段发送给模型，不发送完整日志库。
+- 第一版至少支持本地关键词检索，后续可升级 embedding / vector RAG。
+- Agent prompt 明确要求先使用检索工具，再基于检索结果回答。
+- 缺少证据时，Agent 必须说明当前日志里没有足够依据。
+- 真实 API 模式下，UI 或说明中能表达只发送相关片段的隐私边界。
+
+实现思路：
+
+- F016 现在是“上下文注入”，F018 要升级成“检索式 RAG”。
+- 先做本地关键词 / BM25-like 检索，不急着引入向量数据库。
+- 后续如果日志量变大，再引入 embedding、向量索引和混合检索。
+- 参考 CC 类 agent prompt 的工具协议思想：说明可用工具、何时调用、必须基于工具结果回答、缺失证据不要编造。
+- 不复制任何专有系统 prompt，只借鉴工具调用约束和证据优先的结构。
 
 ### F006：本地数据导出
 

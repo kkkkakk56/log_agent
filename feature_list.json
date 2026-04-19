@@ -239,6 +239,30 @@
       "notes": "建议新增 agentConversationStore，使用独立 localStorage key，例如 journal-agent.agent.conversations.v1。后续可以再做删除、重命名、搜索对话。"
     },
     {
+      "id": "TASK-014",
+      "featureId": "F018",
+      "category": "feature",
+      "description": "Agent 检索式日志访问：使用 RAG / 搜索工具检索相关日志，而不是把所有日志一次性输入给模型",
+      "status": "planned",
+      "priority": 8,
+      "dependsOn": [
+        "F016",
+        "F017"
+      ],
+      "steps": [
+        "设计 journal.search 工具契约，输入包含 query、limit、dateRange、tags、mood 等可选条件",
+        "工具输出只返回相关日志片段，包含 entryId、title、createdAt、excerpt、score、matchReason",
+        "默认不把全部日志塞进 prompt，只发送检索命中的 topK 片段",
+        "第一版可先实现本地关键词 / BM25-like 检索，后续再扩展 embedding 向量 RAG",
+        "支持按用户问题自动生成检索查询，例如最近、某个日期、某个关键词、某种心情",
+        "Agent prompt 参考 CC 类 agent 的工具使用约束：先使用工具、基于工具结果回答、缺证据时说明不知道、不要编造",
+        "保留隐私提示：真实 API 模式下只发送命中片段，而不是发送完整日志库"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build && npm run test:agent-api",
+      "notes": "这是对 F016 的升级。F016 是上下文注入，F018 要变成检索式 RAG：先查相关日志，再把少量证据片段提供给模型。参考 CC prompt 的工具协议思想，但不复制专有系统 prompt。"
+    },
+    {
       "id": "TASK-006",
       "featureId": "F006",
       "category": "feature",
@@ -537,6 +561,32 @@
         "npx cap sync ios"
       ],
       "notes": "第一版先做本地 localStorage 存储；标题可由第一条用户消息自动生成。"
+    },
+    {
+      "id": "F018",
+      "title": "Agent 检索式日志访问 / RAG",
+      "status": "planned",
+      "priority": 8,
+      "phase": "M3-agent-memory",
+      "summary": "让 Agent 通过检索工具查找相关日志片段，而不是把全部日志或大量最近日志一次性输入给模型。",
+      "dependsOn": [
+        "F016",
+        "F017"
+      ],
+      "acceptanceCriteria": [
+        "存在 journal.search 工具契约，支持 query、limit、dateRange、tags、mood 等输入。",
+        "检索结果包含 entryId、title、createdAt、excerpt、score 和 matchReason。",
+        "Agent 默认只把 topK 命中片段发送给模型，不发送完整日志库。",
+        "第一版至少支持本地关键词检索，后续可升级 embedding / vector RAG。",
+        "Agent prompt 明确要求先使用检索工具，再基于检索结果回答。",
+        "缺少证据时，Agent 必须说明当前日志里没有足够依据。",
+        "真实 API 模式下，UI 或说明中能表达只发送相关片段的隐私边界。"
+      ],
+      "verification": [
+        "npm run build",
+        "npm run test:agent-api"
+      ],
+      "notes": "这是 F016 的下一代方案：从上下文注入升级为检索式 RAG。参考 CC 类 agent prompt 的工具协议思想，但不复制专有系统 prompt。"
     },
     {
       "id": "F006",
