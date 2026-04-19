@@ -10,7 +10,7 @@ import {
   sendAgentMessage,
   type AgentChatMessage,
 } from './services/agentClient';
-import { buildJournalContextTool } from './services/journalContextTool';
+import { getJournalRagIndexStatus } from './services/journalRagSearch';
 import {
   appendAgentConversationMessage,
   createAgentConversation,
@@ -67,6 +67,7 @@ const selectedDateKey = ref(getLocalDateKey(new Date()));
 const agentPanelOpen = ref(false);
 const agentInput = ref('');
 const agentIsThinking = ref(false);
+const ragIndexVersion = ref(0);
 const agentConversations = ref<AgentConversation[]>(getAgentConversations());
 const activeAgentConversationId = ref<string | null>(
   getActiveAgentConversationId(agentConversations.value),
@@ -106,9 +107,11 @@ const agentMessages = computed(() => activeAgentConversation.value?.messages ?? 
 const activeAgentConversationTitle = computed(
   () => activeAgentConversation.value?.title ?? '新对话',
 );
-const agentJournalContext = computed(() =>
-  buildJournalContextTool(entries.value, agentInput.value),
-);
+const agentJournalContext = computed(() => {
+  ragIndexVersion.value;
+
+  return getJournalRagIndexStatus(entries.value);
+});
 const canSendAgentMessage = computed(
   () => agentInput.value.trim().length > 0 && !agentIsThinking.value,
 );
@@ -334,6 +337,7 @@ async function submitAgentMessage() {
     refreshAgentConversations();
   } finally {
     agentIsThinking.value = false;
+    ragIndexVersion.value += 1;
   }
 }
 </script>
