@@ -804,22 +804,24 @@ async function submitAgentMessage() {
         </template>
 
         <template v-else>
-          <div>
-            <h1 id="app-title">{{ activeParkSummary.title }}</h1>
-            <p class="today-line">{{ activeParkSummary.description }}</p>
+          <div class="hero-content-row">
+            <div>
+              <h1 id="app-title">{{ activeParkSummary.title }}</h1>
+              <p class="today-line">{{ activeParkSummary.description }}</p>
+            </div>
+
+            <div
+              v-if="activePark === 'journal'"
+              class="header-actions"
+              aria-label="快捷操作"
+            >
+              <div class="today-pill">
+                <span>{{ activeParkSummary.metricValue }}</span>
+                <small>{{ activeParkSummary.metricLabel }}</small>
+              </div>
+            </div>
           </div>
         </template>
-      </div>
-
-      <div
-        v-if="activePark === 'journal'"
-        class="header-actions"
-        aria-label="快捷操作"
-      >
-        <div class="today-pill">
-          <span>{{ activeParkSummary.metricValue }}</span>
-          <small>{{ activeParkSummary.metricLabel }}</small>
-        </div>
       </div>
     </section>
 
