@@ -4,28 +4,43 @@
     "name": "journal-agent",
     "appName": "心记",
     "root": "journal-agent",
-    "currentMilestone": "M2-local-journal"
+    "currentMilestone": "M2-local-journal",
+    "description": "一个先本地可用、后续再扩展同步和分发能力的个人日志 App。"
   },
   "codexWorkflow": {
     "defaultBranch": "main",
-    "iterationPolicy": "Read implementationQueue first. Pick the highest-priority ready task, implement it end-to-end, run its verify_cmd plus required checks when relevant, update feature_list.json and feature_list.md, create a focused commit, then continue only within the approved iteration limit. Push only when explicitly approved or autoPush is enabled.",
+    "iterationPolicy": "优先读取 implementationQueue。选择优先级最高、状态为 ready、依赖已完成的任务；先实现、再运行 verify_cmd 和必要检查；随后更新 feature_list.json 与 feature_list.md，创建聚焦提交。只有在用户明确批准或 autoPush=true 时才 push。",
     "taskSource": "implementationQueue",
+    "requirementIntakePolicy": {
+      "userCanDescribeNeedsNaturally": true,
+      "codexResponsibility": "用户提出需求后，Codex 先把需求拆成可执行任务卡，写入 implementationQueue，并同步更新 feature_list.md；随后再实现最高优先级的 ready 任务。",
+      "planningBeforeImplementation": true,
+      "askBeforeCodingWhen": [
+        "需求会明显影响产品方向或数据结构",
+        "存在多个代价接近但体验差异很大的方案",
+        "需要付费账号、证书、密钥、云服务或外部凭据",
+        "任务太大，需要先拆分里程碑"
+      ],
+      "defaultBehavior": "如果需求清晰且风险不高，Codex 可以直接补计划、实现、验证并提交。"
+    },
     "taskSelectionRules": [
-      "Prefer status=ready over planned.",
-      "Within ready tasks, choose the lowest priority number.",
-      "Skip tasks whose dependsOn items are not done.",
-      "If a task is too large, split it into smaller ready tasks before coding.",
-      "Mark passes=true only after the listed verification succeeds or the verification gap is documented."
+      "优先选择 status=ready 的任务。",
+      "多个 ready 任务中选择 priority 数字最小的任务。",
+      "如果 dependsOn 中的任务或功能尚未完成，则跳过该任务。",
+      "如果任务过大，先拆成更小的任务卡再开始编码。",
+      "只有在验证通过或明确记录验证缺口后，才能把 passes 标为 true。"
     ],
     "iterationControls": {
       "defaultMode": "one_task_per_user_request",
-      "autonomousModeTrigger": "User explicitly says to continue iterating, auto-iterate, or develop the next feature.",
+      "defaultModeDescription": "默认每次用户请求只完成一个任务，避免悄悄扩大范围。",
+      "autonomousModeTrigger": "当用户明确说继续迭代、自动迭代、按 feature_list 往下做、继续下一个功能时，才进入连续迭代模式。",
       "maxTasksPerAutonomousRun": 3,
       "stopConditions": [
-        "A verification command fails and the fix is not obvious.",
-        "A task requires account credentials, paid services, certificates, or secrets.",
-        "A product decision has meaningful tradeoffs.",
-        "Git has unexpected unrelated changes that could be user work."
+        "验证命令失败且修复方式不明显。",
+        "任务需要账号凭据、付费服务、证书、密钥或云端权限。",
+        "任务包含明显产品取舍，需要用户决策。",
+        "Git 中出现可能来自用户的非相关改动。",
+        "下一步会改变已保存数据格式且存在迁移风险。"
       ]
     },
     "autoCommit": true,
@@ -37,12 +52,13 @@
     "optionalVerification": [
       "xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination \"platform=iOS Simulator,name=iPhone 16,OS=18.4\" -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build"
     ],
-    "commitMessagePattern": "<type>: <short feature summary>",
+    "commitMessagePattern": "<type>: <简短功能摘要>",
     "safeCommitRules": [
-      "Do not commit node_modules, dist, Xcode DerivedData, or device-specific xcuserdata.",
-      "Do not push secrets, private keys, App Store Connect keys, certificates, or provisioning profiles.",
-      "Keep each commit focused on one feature or one repository-maintenance task.",
-      "Update the completed feature's status, acceptance notes, and verification evidence before committing."
+      "不要提交 node_modules、dist、Xcode DerivedData 或设备相关的 xcuserdata。",
+      "不要提交密钥、私钥、证书、配置描述文件、API Key 或 App Store Connect 凭据。",
+      "每个 commit 尽量只包含一个功能或一个维护任务。",
+      "任务完成后，先更新任务状态、验收说明和验证结果，再提交。",
+      "push 前需要用户明确同意，除非 autoPush 被改为 true。"
     ]
   },
   "statuses": [
@@ -52,6 +68,13 @@
     "blocked",
     "deferred"
   ],
+  "statusLabels": {
+    "done": "已完成并验证",
+    "ready": "可以开始实现",
+    "planned": "已计划但暂不实现",
+    "blocked": "被账号、依赖或决策阻塞",
+    "deferred": "有意延后"
+  },
   "taskStatuses": [
     "done",
     "ready",
@@ -59,18 +82,26 @@
     "blocked",
     "deferred"
   ],
+  "categoryLabels": {
+    "core": "核心能力",
+    "feature": "产品功能",
+    "workflow": "开发流程",
+    "test": "测试验证",
+    "docs": "文档",
+    "bugfix": "问题修复"
+  },
   "taskCardSchema": {
-    "id": "Stable task id, such as TASK-005 or CORE-11.",
-    "featureId": "Optional link to a feature id in features.",
-    "category": "core, feature, workflow, test, docs, or bugfix.",
-    "description": "One-sentence user-facing outcome.",
-    "status": "ready, planned, blocked, deferred, or done.",
-    "priority": "Lower number runs earlier.",
-    "dependsOn": "Task ids or feature ids that must be done first.",
-    "steps": "Concrete behavior and acceptance steps.",
-    "passes": "true only after verification passes.",
-    "verify_cmd": "Primary command Codex should run after implementation.",
-    "notes": "Implementation hints, risks, or verification evidence."
+    "id": "稳定任务编号，例如 TASK-005、CORE-11 或 FEAT-01。",
+    "featureId": "可选字段，用于关联 features 里的产品功能编号。",
+    "category": "任务类别，可用 core、feature、workflow、test、docs、bugfix。",
+    "description": "一句话描述用户能感知到的结果。",
+    "status": "任务状态，可用 ready、planned、blocked、deferred、done。",
+    "priority": "优先级数字，数字越小越先做。",
+    "dependsOn": "必须先完成的任务编号或功能编号。",
+    "steps": "具体行为、验收步骤或测试步骤。",
+    "passes": "只有验证通过后才标记为 true。",
+    "verify_cmd": "实现后 Codex 需要运行的主要验证命令。",
+    "notes": "实现提示、风险、决策记录或验证证据。"
   },
   "implementationQueue": [
     {
@@ -161,269 +192,269 @@
   "features": [
     {
       "id": "F001",
-      "title": "Free Apple Account iPhone shell",
+      "title": "免费 Apple Account 真机空壳",
       "status": "done",
       "priority": 0,
       "phase": "M0-device-shell",
-      "summary": "Run a minimal Capacitor/Vue shell app on an iPhone using Xcode and a free Apple Account.",
+      "summary": "使用 Xcode 和免费 Apple Account，把最小 Capacitor/Vue 空壳 App 跑到 iPhone 上。",
       "dependsOn": [],
       "acceptanceCriteria": [
-        "The app installs on a real iPhone through Xcode Run.",
-        "The app opens without a white screen.",
-        "The shell page displays the app name and version."
+        "App 可以通过 Xcode Run 安装到真实 iPhone。",
+        "App 打开后不是白屏。",
+        "空壳页面能展示 App 名称和基础版本信息。"
       ],
       "verification": [
         "npm run build",
         "npx cap sync ios"
       ],
-      "notes": "Completed before feature backlog formalization."
+      "notes": "在正式建立功能清单前已完成。"
     },
     {
       "id": "F002",
-      "title": "Local journal CRUD",
+      "title": "本地日志增删改查",
       "status": "done",
       "priority": 1,
       "phase": "M2-local-journal",
-      "summary": "Create, list, edit, and soft-delete journal entries stored locally.",
+      "summary": "支持创建、查看、编辑和软删除本地日志。",
       "dependsOn": [
         "F001"
       ],
       "acceptanceCriteria": [
-        "Users can create a text journal entry.",
-        "Entries persist after closing and reopening the app.",
-        "Users can edit existing entries.",
-        "Users can delete entries with confirmation.",
-        "Entries are grouped by date in the timeline."
+        "用户可以创建文本日志。",
+        "关闭并重新打开 App 后，日志仍然存在。",
+        "用户可以编辑已有日志。",
+        "用户可以在确认后删除日志。",
+        "时间线按日期分组展示日志。"
       ],
       "verification": [
         "npm run build",
         "npx cap sync ios",
-        "xcodebuild simulator build succeeded"
+        "xcodebuild 模拟器构建成功"
       ],
-      "notes": "Implemented with localStorage behind src/storage/journalStore.ts."
+      "notes": "已通过 src/storage/journalStore.ts 使用 localStorage 实现。"
     },
     {
       "id": "F003",
-      "title": "Search and calendar lookup",
+      "title": "搜索与日历查询",
       "status": "done",
       "priority": 2,
       "phase": "M2-local-journal",
-      "summary": "Add keyword search and monthly calendar lookup with marked days that contain journal entries.",
+      "summary": "增加关键词搜索和月历查询；有日志的日期需要有明显标记。",
       "dependsOn": [
         "F002"
       ],
       "acceptanceCriteria": [
-        "Users can switch between timeline, search, and calendar views.",
-        "Search matches journal title, content, and tags.",
-        "Calendar shows current month with previous and next month navigation.",
-        "Days with entries are visually marked.",
-        "Marker intensity changes based on entry count.",
-        "Selecting a date displays entries from that day."
+        "用户可以在时间线、搜索、日历视图之间切换。",
+        "搜索可以匹配日志标题、正文和标签。",
+        "日历显示当前月份，并支持切换上个月和下个月。",
+        "有日志的日期会有视觉标记。",
+        "标记强度会根据当天日志数量变化。",
+        "选择某一天后，可以看到当天日志。"
       ],
       "verification": [
         "npm run build",
         "npx cap sync ios",
-        "xcodebuild simulator build succeeded"
+        "xcodebuild 模拟器构建成功"
       ],
-      "notes": "1 entry shows a dot, 2-3 entries use a warm marker, and 4+ entries use a dark marker."
+      "notes": "1 条日志显示圆点，2-3 条使用暖色标记，4 条以上使用更深色标记。"
     },
     {
       "id": "F004",
-      "title": "Repository hygiene and backlog system",
+      "title": "仓库整理与功能清单机制",
       "status": "done",
       "priority": 3,
       "phase": "M1-workflow",
-      "summary": "Track features in machine-readable JSON and human-readable Markdown, and keep generated files out of git.",
+      "summary": "用机器可读 JSON 和人类可读 Markdown 管理功能，同时避免把生成文件提交到 Git。",
       "dependsOn": [],
       "acceptanceCriteria": [
-        "feature_list.json exists and contains prioritized feature metadata.",
-        "feature_list.md exists and explains the iteration workflow.",
-        "Root .gitignore prevents generated build artifacts from being committed.",
-        "Already tracked Xcode build artifacts are removed from the git index while preserved locally."
+        "feature_list.json 存在，并包含按优先级排列的功能元数据。",
+        "feature_list.md 存在，并解释迭代流程。",
+        "根目录 .gitignore 能阻止生成产物被提交。",
+        "已经被 Git 跟踪的 Xcode build 产物从索引中移除，但本地文件保留。"
       ],
       "verification": [
         "git status --short",
-        "git ls-files journal-agent/build returns no files after cleanup",
-        "feature_list.json parses as JSON"
+        "git ls-files journal-agent/build 不再返回文件",
+        "feature_list.json 可以被正常解析"
       ],
-      "notes": "Backlog files were created and generated Xcode build artifacts were removed from git tracking while preserved locally."
+      "notes": "已创建 backlog 文件，并把生成的 Xcode build 产物从 Git 跟踪中移除。"
     },
     {
       "id": "F005",
-      "title": "Draft auto-save",
+      "title": "草稿自动保存",
       "status": "ready",
       "priority": 4,
       "phase": "M2-local-journal",
-      "summary": "Preserve unfinished draft text if the app is closed, refreshed, or backgrounded.",
+      "summary": "当 App 关闭、刷新或进入后台时，保留尚未提交的日志草稿。",
       "dependsOn": [
         "F002"
       ],
       "acceptanceCriteria": [
-        "Unsubmitted draft text is restored after app restart.",
-        "Saving a journal entry clears the draft.",
-        "Users can manually clear the draft.",
-        "Draft storage is separate from saved journal entries."
+        "未提交的标题、正文或标签草稿可以在重启 App 后恢复。",
+        "成功保存日志后自动清空草稿。",
+        "用户可以手动清空草稿。",
+        "草稿存储与正式日志存储分离。"
       ],
       "verification": [
         "npm run build",
         "npx cap sync ios"
       ],
-      "notes": "Use a separate localStorage key such as journal-agent.draft.v1."
+      "notes": "使用独立 localStorage key，例如 journal-agent.draft.v1。"
     },
     {
       "id": "F006",
-      "title": "Export local data",
+      "title": "本地数据导出",
       "status": "planned",
       "priority": 5,
       "phase": "M3-data-safety",
-      "summary": "Allow users to export journal entries as JSON and Markdown for backup.",
+      "summary": "允许用户把日志导出为 JSON 和 Markdown，方便备份。",
       "dependsOn": [
         "F002"
       ],
       "acceptanceCriteria": [
-        "Users can export all entries as JSON.",
-        "Users can export readable Markdown.",
-        "Export excludes soft-deleted entries by default.",
-        "Export includes createdAt and updatedAt metadata."
+        "用户可以导出全部日志为 JSON。",
+        "用户可以导出可读 Markdown。",
+        "默认不导出软删除日志。",
+        "导出内容包含 createdAt 和 updatedAt 等元数据。"
       ],
       "verification": [
         "npm run build"
       ],
-      "notes": "Capacitor file sharing can be considered later; browser download is enough for the first pass."
+      "notes": "后续可以考虑 Capacitor 文件分享；第一版使用浏览器下载即可。"
     },
     {
       "id": "F007",
-      "title": "Mood and tags",
+      "title": "心情与标签",
       "status": "planned",
       "priority": 6,
       "phase": "M3-organization",
-      "summary": "Add lightweight mood and tag metadata to entries.",
+      "summary": "为日志增加轻量心情和标签元数据。",
       "dependsOn": [
         "F002"
       ],
       "acceptanceCriteria": [
-        "Users can choose one mood for an entry.",
-        "Users can add and remove tags.",
-        "Timeline cards display mood and tags.",
-        "Search includes tags.",
-        "Calendar can optionally color days by dominant mood."
+        "用户可以为一篇日志选择一个心情。",
+        "用户可以添加和删除标签。",
+        "时间线卡片展示心情和标签。",
+        "搜索可以匹配标签。",
+        "日历后续可以按当天主要心情改变颜色。"
       ],
       "verification": [
         "npm run build",
         "npx cap sync ios"
       ],
-      "notes": "Data model already has mood and tags fields."
+      "notes": "当前数据模型已经预留 mood 和 tags 字段。"
     },
     {
       "id": "F008",
-      "title": "Search polish",
+      "title": "搜索体验优化",
       "status": "planned",
       "priority": 7,
       "phase": "M3-organization",
-      "summary": "Improve search with highlighted matches, clear button, and result snippets.",
+      "summary": "增加搜索命中高亮、清空按钮和结果摘要片段。",
       "dependsOn": [
         "F003"
       ],
       "acceptanceCriteria": [
-        "Matched terms are visually highlighted.",
-        "A clear button resets the query.",
-        "Long entries show a relevant snippet around the match.",
-        "Search remains fast for at least 1000 local entries."
+        "命中的关键词会被视觉高亮。",
+        "清空按钮可以重置搜索词。",
+        "长日志会显示围绕命中位置的相关摘要。",
+        "本地至少 1000 条日志时，搜索仍保持流畅。"
       ],
       "verification": [
         "npm run build"
       ],
-      "notes": "Avoid adding heavy search dependencies until needed."
+      "notes": "在数据规模明显变大前，避免引入重型搜索依赖。"
     },
     {
       "id": "F009",
-      "title": "IndexedDB storage adapter",
+      "title": "IndexedDB 存储适配器",
       "status": "planned",
       "priority": 8,
       "phase": "M4-storage",
-      "summary": "Move from localStorage to an async storage adapter suited for larger journal history.",
+      "summary": "从 localStorage 迁移到更适合大量日志的异步 IndexedDB 存储适配器。",
       "dependsOn": [
         "F002",
         "F006"
       ],
       "acceptanceCriteria": [
-        "Storage API is async and typed.",
-        "Existing localStorage entries migrate once.",
-        "Users do not lose existing entries.",
-        "The app handles migration failure gracefully."
+        "存储 API 是异步且类型明确的。",
+        "已有 localStorage 日志可以迁移一次。",
+        "用户不会丢失已有日志。",
+        "迁移失败时 App 能给出安全降级或提示。"
       ],
       "verification": [
         "npm run build",
-        "manual migration test with existing localStorage data"
+        "使用已有 localStorage 数据做手动迁移测试"
       ],
-      "notes": "Do this before images, audio, or very large entries."
+      "notes": "建议在图片、音频或大量长文本日志之前完成。"
     },
     {
       "id": "F010",
-      "title": "iCloud sync design spike",
+      "title": "iCloud 同步方案调研",
       "status": "planned",
       "priority": 9,
       "phase": "M5-sync",
-      "summary": "Research and design CloudKit/iCloud sync architecture before implementation.",
+      "summary": "在实现前研究并设计 CloudKit/iCloud 同步架构。",
       "dependsOn": [
         "F006",
         "F009"
       ],
       "acceptanceCriteria": [
-        "Document Apple Developer Program requirements.",
-        "Choose CloudKit data model and conflict strategy.",
-        "Define local-first sync states.",
-        "Identify required native capabilities and entitlements."
+        "记录 Apple Developer Program 的要求。",
+        "选择 CloudKit 数据模型和冲突处理策略。",
+        "定义本地优先的同步状态。",
+        "识别需要的原生能力和 entitlements。"
       ],
       "verification": [
-        "Design doc reviewed"
+        "方案文档已评审"
       ],
-      "notes": "Implementation likely requires Apple Developer Program."
+      "notes": "正式实现大概率需要 Apple Developer Program。"
     },
     {
       "id": "F011",
-      "title": "Privacy lock",
+      "title": "隐私锁",
       "status": "planned",
       "priority": 10,
       "phase": "M6-privacy",
-      "summary": "Protect the app with Face ID / passcode style local authentication.",
+      "summary": "用 Face ID / 密码式本地认证保护 App 内容。",
       "dependsOn": [
         "F002"
       ],
       "acceptanceCriteria": [
-        "Users can enable or disable app lock.",
-        "App requests authentication when opened.",
-        "Failure leaves journal content hidden.",
-        "Fallback behavior is documented."
+        "用户可以开启或关闭 App 锁。",
+        "App 打开时会请求本地认证。",
+        "认证失败时日志内容保持隐藏。",
+        "降级和失败处理行为有明确记录。"
       ],
       "verification": [
         "npm run build",
         "npx cap sync ios",
-        "manual iPhone test"
+        "iPhone 真机手动测试"
       ],
-      "notes": "Requires a Capacitor/native authentication plugin or custom native bridge."
+      "notes": "需要 Capacitor/原生认证插件，或自定义 native bridge。"
     },
     {
       "id": "F012",
-      "title": "TestFlight distribution",
+      "title": "TestFlight 分发",
       "status": "planned",
       "priority": 11,
       "phase": "M7-distribution",
-      "summary": "Move from free-account local install to TestFlight distribution.",
+      "summary": "从免费账号本地安装，升级到 TestFlight 内测分发。",
       "dependsOn": [
         "F002"
       ],
       "acceptanceCriteria": [
-        "Apple Developer Program is active.",
-        "App Store Connect app record exists.",
-        "Xcode Archive uploads successfully.",
-        "Internal TestFlight install works on iPhone."
+        "Apple Developer Program 已开通。",
+        "App Store Connect 中已有 App 记录。",
+        "Xcode Archive 可以成功上传。",
+        "内部 TestFlight 可以在 iPhone 安装运行。"
       ],
       "verification": [
-        "Archive upload success",
-        "TestFlight install success"
+        "Archive 上传成功",
+        "TestFlight 安装成功"
       ],
-      "notes": "Only needed when local Xcode Run becomes too limiting."
+      "notes": "只有当本地 Xcode Run 不够用时才需要推进。"
     }
   ]
 }
