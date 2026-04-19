@@ -153,7 +153,7 @@
       "category": "feature",
       "description": "草稿自动保存：未提交的日志内容在刷新、关闭或切后台后可以恢复",
       "status": "ready",
-      "priority": 7,
+      "priority": 8,
       "dependsOn": [
         "F002"
       ],
@@ -214,12 +214,37 @@
       "notes": "已完成。第一版是客户端本地工具抽象，后续迁移后端时可以替换成真正 function/tool call。注意：使用真实 API 时，本地日志上下文会发送给模型服务。验证通过：npm run build，npm run test:agent-api，npx cap sync ios。"
     },
     {
+      "id": "TASK-013",
+      "featureId": "F017",
+      "category": "feature",
+      "description": "Agent 多对话与存储：支持打开新对话，并把不同对话的消息记录持久化保存",
+      "status": "ready",
+      "priority": 7,
+      "dependsOn": [
+        "F014",
+        "F015",
+        "F016"
+      ],
+      "steps": [
+        "Agent 浮窗增加“新对话”入口",
+        "点击新对话后创建独立 conversation，并清空当前聊天窗口的消息流",
+        "每个 conversation 保存 id、title、createdAt、updatedAt 和 messages",
+        "对话消息持久化到本地存储，重启 App 后可以恢复",
+        "支持在多个历史对话之间切换",
+        "对话标题可先由第一条用户消息自动生成",
+        "保留日志读取工具能力：每次发送消息仍可读取当前日志上下文"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "建议新增 agentConversationStore，使用独立 localStorage key，例如 journal-agent.agent.conversations.v1。后续可以再做删除、重命名、搜索对话。"
+    },
+    {
       "id": "TASK-006",
       "featureId": "F006",
       "category": "feature",
       "description": "本地数据导出：把日志导出为 JSON 和 Markdown，便于备份",
       "status": "planned",
-      "priority": 7,
+      "priority": 9,
       "dependsOn": [
         "F002"
       ],
@@ -240,7 +265,7 @@
       "category": "feature",
       "description": "心情与标签：日志支持 mood 和 tags，并在列表、搜索、日历中展示",
       "status": "planned",
-      "priority": 8,
+      "priority": 10,
       "dependsOn": [
         "F002",
         "F003"
@@ -262,7 +287,7 @@
       "category": "feature",
       "description": "搜索体验优化：高亮关键词、清空查询、显示命中片段",
       "status": "planned",
-      "priority": 9,
+      "priority": 11,
       "dependsOn": [
         "F003"
       ],
@@ -418,7 +443,7 @@
       "id": "F005",
       "title": "草稿自动保存",
       "status": "ready",
-      "priority": 7,
+      "priority": 8,
       "phase": "M2-local-journal",
       "summary": "当 App 关闭、刷新或进入后台时，保留尚未提交的日志草稿。",
       "dependsOn": [
@@ -488,10 +513,36 @@
       "notes": "已完成。第一版先做客户端工具抽象；真实 API 模式会把本地日志上下文发送给模型服务。"
     },
     {
+      "id": "F017",
+      "title": "Agent 多对话与存储",
+      "status": "ready",
+      "priority": 7,
+      "phase": "M2-local-journal",
+      "summary": "让 Agent 支持新建多个独立对话，并把对话消息持久化保存到本地。",
+      "dependsOn": [
+        "F014",
+        "F015",
+        "F016"
+      ],
+      "acceptanceCriteria": [
+        "Agent 浮窗有“新对话”入口。",
+        "新对话拥有独立消息记录，不混入上一段聊天。",
+        "对话数据包含 id、title、createdAt、updatedAt 和 messages。",
+        "关闭并重新打开 App 后，历史对话仍然存在。",
+        "用户可以在多个历史对话之间切换。",
+        "每次发送消息时仍然可以使用日志读取工具读取当前日志上下文。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "第一版先做本地 localStorage 存储；标题可由第一条用户消息自动生成。"
+    },
+    {
       "id": "F006",
       "title": "本地数据导出",
       "status": "planned",
-      "priority": 7,
+      "priority": 9,
       "phase": "M3-data-safety",
       "summary": "允许用户把日志导出为 JSON 和 Markdown，方便备份。",
       "dependsOn": [
@@ -512,7 +563,7 @@
       "id": "F007",
       "title": "心情与标签",
       "status": "planned",
-      "priority": 8,
+      "priority": 10,
       "phase": "M3-organization",
       "summary": "为日志增加轻量心情和标签元数据。",
       "dependsOn": [
@@ -535,7 +586,7 @@
       "id": "F008",
       "title": "搜索体验优化",
       "status": "planned",
-      "priority": 9,
+      "priority": 11,
       "phase": "M3-organization",
       "summary": "增加搜索命中高亮、清空按钮和结果摘要片段。",
       "dependsOn": [
@@ -556,7 +607,7 @@
       "id": "F009",
       "title": "IndexedDB 存储适配器",
       "status": "planned",
-      "priority": 10,
+      "priority": 12,
       "phase": "M4-storage",
       "summary": "从 localStorage 迁移到更适合大量日志的异步 IndexedDB 存储适配器。",
       "dependsOn": [
@@ -579,7 +630,7 @@
       "id": "F010",
       "title": "iCloud 同步方案调研",
       "status": "planned",
-      "priority": 11,
+      "priority": 13,
       "phase": "M5-sync",
       "summary": "在实现前研究并设计 CloudKit/iCloud 同步架构。",
       "dependsOn": [
@@ -601,7 +652,7 @@
       "id": "F011",
       "title": "隐私锁",
       "status": "planned",
-      "priority": 12,
+      "priority": 14,
       "phase": "M6-privacy",
       "summary": "用 Face ID / 密码式本地认证保护 App 内容。",
       "dependsOn": [
@@ -624,7 +675,7 @@
       "id": "F012",
       "title": "TestFlight 分发",
       "status": "planned",
-      "priority": 13,
+      "priority": 15,
       "phase": "M7-distribution",
       "summary": "从免费账号本地安装，升级到 TestFlight 内测分发。",
       "dependsOn": [

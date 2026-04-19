@@ -146,6 +146,7 @@ Codex 会优先读取这些任务卡：
 
 | 任务 | 状态 | 描述 | 验证 |
 |---|---|---|---|
+| `TASK-013` | `ready` | Agent 多对话与存储：支持打开新对话，并把不同对话的消息记录持久化保存 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-005` | `ready` | 草稿自动保存：未提交的日志内容在刷新、关闭或切后台后可以恢复 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-006` | `planned` | 本地数据导出：把日志导出为 JSON 和 Markdown，便于备份 | `cd journal-agent && npm run build` |
 | `TASK-007` | `planned` | 心情与标签：日志支持 mood 和 tags，并在列表、搜索、日历中展示 | `cd journal-agent && npm run build && npx cap sync ios` |
@@ -299,6 +300,28 @@ Codex 会优先读取这些任务卡：
 
 ## 准备实现
 
+### F017：Agent 多对话与存储
+
+状态：`ready`
+
+让 Agent 支持新建多个独立对话，并把对话消息持久化保存到本地。
+
+验收标准：
+
+- Agent 浮窗有“新对话”入口。
+- 新对话拥有独立消息记录，不混入上一段聊天。
+- 对话数据包含 `id`、`title`、`createdAt`、`updatedAt` 和 `messages`。
+- 关闭并重新打开 App 后，历史对话仍然存在。
+- 用户可以在多个历史对话之间切换。
+- 每次发送消息时仍然可以使用日志读取工具读取当前日志上下文。
+
+实现提示：
+
+- 建议新增 `agentConversationStore`。
+- 使用独立 localStorage key，例如 `journal-agent.agent.conversations.v1`。
+- 第一版标题可以由第一条用户消息自动生成。
+- 后续可以再补删除、重命名、搜索对话。
+
 ### F005：草稿自动保存
 
 状态：`ready`
@@ -358,4 +381,4 @@ Codex 会优先读取这些任务卡：
 
 ## 下一步建议
 
-实现 `TASK-005 / F005：草稿自动保存`，然后运行对应验证命令并提交结果。
+实现 `TASK-013 / F017：Agent 多对话与存储`，然后运行对应验证命令并提交结果。
