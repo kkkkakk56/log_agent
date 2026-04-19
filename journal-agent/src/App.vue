@@ -52,14 +52,18 @@ import {
 
 type ActivePark = 'journal' | 'knowledge' | 'lab' | 'plan';
 type ActiveView = 'timeline' | 'search' | 'calendar';
+type KnowledgeInspectorMode =
+  | 'base'
+  | 'base-edit'
+  | 'note-view'
+  | 'note-edit'
+  | 'note-create';
 
 interface ParkSummary {
   id: ActivePark;
   label: string;
-  eyebrow: string;
   title: string;
   description: string;
-  caption: string;
   metricValue: string;
   metricLabel: string;
 }
@@ -89,12 +93,16 @@ const draftContent = ref('');
 const editingId = ref<string | null>(null);
 const editingContent = ref('');
 const activeKnowledgeBaseId = ref<string | null>(knowledgeBases.value[0]?.id ?? null);
+const knowledgeDrawerOpen = ref(knowledgeBases.value.length === 0);
+const knowledgeBaseComposerOpen = ref(knowledgeBases.value.length === 0);
 const newKnowledgeBaseName = ref('');
 const newKnowledgeBaseDescription = ref('');
 const newKnowledgeBaseTags = ref('');
 const editingKnowledgeBaseName = ref(knowledgeBases.value[0]?.name ?? '');
 const editingKnowledgeBaseDescription = ref(knowledgeBases.value[0]?.description ?? '');
 const editingKnowledgeBaseTags = ref(knowledgeBases.value[0]?.tags.join('，') ?? '');
+const selectedKnowledgeNoteId = ref<string | null>(null);
+const knowledgeInspectorMode = ref<KnowledgeInspectorMode>('base');
 const newKnowledgeNoteTitle = ref('');
 const newKnowledgeNoteContent = ref('');
 const newKnowledgeNoteSourceUrl = ref('');
@@ -151,7 +159,13 @@ const activeKnowledgeNotes = computed(() => {
   return knowledgeNotes.value.filter((note) => note.baseId === baseId);
 });
 
-const knowledgeNoteCount = computed(() => knowledgeNotes.value.length);
+const selectedKnowledgeNote = computed(
+  () =>
+    activeKnowledgeNotes.value.find(
+      (note) => note.id === selectedKnowledgeNoteId.value,
+    ) ?? null,
+);
+
 const canCreateKnowledgeBase = computed(
   () => newKnowledgeBaseName.value.trim().length > 0,
 );
@@ -174,41 +188,25 @@ const canSaveKnowledgeNote = computed(
 const parkSummaries = computed<ParkSummary[]>(() => [
   {
     id: 'journal',
-    label: '日记区',
-    eyebrow: '个人记录',
+    label: '心记',
     title: '心记',
     description: formatTodayHeader(),
-    caption: '写下每天发生的事',
     metricValue: String(todayCount.value),
     metricLabel: '今日',
   },
   {
     id: 'knowledge',
-    label: '知识库',
-    eyebrow: '学习资料',
-    title: '知识库',
+    label: '笔记',
+    title: '笔记',
     description: '学习库和知识记录会放在这里，不混入日记时间线。',
-    caption: '整理长期知识',
     metricValue: String(knowledgeBases.value.length),
     metricLabel: '知识库',
   },
   {
     id: 'lab',
-    label: '项目实验库',
-    eyebrow: '进度追踪',
-    title: '项目实验库',
+    label: '做记',
+    title: '做记',
     description: '项目、实验、决策和复盘会在这里聚合。',
-    caption: '项目与实验',
-    metricValue: 'Park',
-    metricLabel: '规划',
-  },
-  {
-    id: 'plan',
-    label: '计划区',
-    eyebrow: '未来安排',
-    title: '计划区',
-    description: '目标、计划和待办后续会进入这里。',
-    caption: '目标与计划',
     metricValue: 'Park',
     metricLabel: '规划',
   },
@@ -290,10 +288,23 @@ function parseKnowledgeTags(rawTags: string): string[] {
     .filter((tag) => tag.length > 0);
 }
 
+function resetNewKnowledgeBaseForm() {
+  newKnowledgeBaseName.value = '';
+  newKnowledgeBaseDescription.value = '';
+  newKnowledgeBaseTags.value = '';
+}
+
 function resetKnowledgeBaseEditor(base: KnowledgeBase | null) {
   editingKnowledgeBaseName.value = base?.name ?? '';
   editingKnowledgeBaseDescription.value = base?.description ?? '';
   editingKnowledgeBaseTags.value = base?.tags.join('，') ?? '';
+}
+
+function resetNewKnowledgeNoteForm() {
+  newKnowledgeNoteTitle.value = '';
+  newKnowledgeNoteContent.value = '';
+  newKnowledgeNoteSourceUrl.value = '';
+  newKnowledgeNoteTags.value = '';
 }
 
 function refreshKnowledgeData() {
@@ -311,6 +322,29 @@ function refreshKnowledgeData() {
     activeKnowledgeBaseId.value = knowledgeBases.value[0]?.id ?? null;
   }
 
+  if (
+    selectedKnowledgeNoteId.value &&
+    !activeKnowledgeNotes.value.some((note) => note.id === selectedKnowledgeNoteId.value)
+  ) {
+    selectedKnowledgeNoteId.value = null;
+  }
+
+  if (!activeKnowledgeBase.value) {
+    selectedKnowledgeNoteId.value = null;
+    knowledgeInspectorMode.value = 'base';
+  } else if (
+    (knowledgeInspectorMode.value === 'note-view' ||
+      knowledgeInspectorMode.value === 'note-edit') &&
+    !selectedKnowledgeNote.value
+  ) {
+    knowledgeInspectorMode.value = 'base';
+  }
+
+  if (knowledgeBases.value.length === 0) {
+    knowledgeDrawerOpen.value = true;
+    knowledgeBaseComposerOpen.value = true;
+  }
+
   resetKnowledgeBaseEditor(activeKnowledgeBase.value);
 }
 
@@ -320,8 +354,38 @@ function getKnowledgeNoteCount(baseId: string): number {
 
 function selectKnowledgeBase(baseId: string) {
   activeKnowledgeBaseId.value = baseId;
+  knowledgeDrawerOpen.value = false;
+  selectedKnowledgeNoteId.value = null;
+  knowledgeInspectorMode.value = 'base';
+  resetNewKnowledgeNoteForm();
   cancelKnowledgeNoteEditing();
   resetKnowledgeBaseEditor(activeKnowledgeBase.value);
+}
+
+function toggleKnowledgeDrawer() {
+  knowledgeDrawerOpen.value = !knowledgeDrawerOpen.value;
+}
+
+function openKnowledgeDrawer() {
+  knowledgeDrawerOpen.value = true;
+}
+
+function closeKnowledgeDrawer() {
+  knowledgeDrawerOpen.value = false;
+}
+
+function openKnowledgeBaseComposer() {
+  knowledgeDrawerOpen.value = true;
+  knowledgeBaseComposerOpen.value = true;
+}
+
+function closeKnowledgeBaseComposer() {
+  if (knowledgeBases.value.length === 0) {
+    return;
+  }
+
+  knowledgeBaseComposerOpen.value = false;
+  resetNewKnowledgeBaseForm();
 }
 
 function saveNewKnowledgeBase() {
@@ -336,10 +400,29 @@ function saveNewKnowledgeBase() {
   }
 
   activeKnowledgeBaseId.value = base.id;
-  newKnowledgeBaseName.value = '';
-  newKnowledgeBaseDescription.value = '';
-  newKnowledgeBaseTags.value = '';
+  knowledgeDrawerOpen.value = false;
+  knowledgeBaseComposerOpen.value = false;
+  selectedKnowledgeNoteId.value = null;
+  knowledgeInspectorMode.value = 'base';
+  resetNewKnowledgeBaseForm();
   refreshKnowledgeData();
+}
+
+function showKnowledgeBaseSummary() {
+  selectedKnowledgeNoteId.value = null;
+  knowledgeInspectorMode.value = 'base';
+  resetNewKnowledgeNoteForm();
+  cancelKnowledgeNoteEditing();
+}
+
+function startKnowledgeBaseEditing() {
+  if (!activeKnowledgeBase.value) {
+    return;
+  }
+
+  selectedKnowledgeNoteId.value = null;
+  knowledgeInspectorMode.value = 'base-edit';
+  resetKnowledgeBaseEditor(activeKnowledgeBase.value);
 }
 
 function saveKnowledgeBaseDetails() {
@@ -358,6 +441,7 @@ function saveKnowledgeBaseDetails() {
   }
 
   activeKnowledgeBaseId.value = updatedBase.id;
+  knowledgeInspectorMode.value = 'base';
   refreshKnowledgeData();
 }
 
@@ -371,8 +455,21 @@ function removeKnowledgeBase(base: KnowledgeBase) {
   }
 
   deleteKnowledgeBase(base.id);
+  selectedKnowledgeNoteId.value = null;
+  knowledgeInspectorMode.value = 'base';
   cancelKnowledgeNoteEditing();
   refreshKnowledgeData();
+}
+
+function startKnowledgeNoteComposer() {
+  if (!activeKnowledgeBase.value) {
+    return;
+  }
+
+  selectedKnowledgeNoteId.value = null;
+  knowledgeInspectorMode.value = 'note-create';
+  cancelKnowledgeNoteEditing();
+  resetNewKnowledgeNoteForm();
 }
 
 function saveNewKnowledgeNote() {
@@ -391,14 +488,22 @@ function saveNewKnowledgeNote() {
     return;
   }
 
-  newKnowledgeNoteTitle.value = '';
-  newKnowledgeNoteContent.value = '';
-  newKnowledgeNoteSourceUrl.value = '';
-  newKnowledgeNoteTags.value = '';
+  selectedKnowledgeNoteId.value = note.id;
+  knowledgeInspectorMode.value = 'note-view';
+  resetNewKnowledgeNoteForm();
   refreshKnowledgeData();
 }
 
+function selectKnowledgeNote(note: KnowledgeNote) {
+  selectedKnowledgeNoteId.value = note.id;
+  knowledgeInspectorMode.value = 'note-view';
+  resetNewKnowledgeNoteForm();
+  cancelKnowledgeNoteEditing();
+}
+
 function startKnowledgeNoteEditing(note: KnowledgeNote) {
+  selectedKnowledgeNoteId.value = note.id;
+  knowledgeInspectorMode.value = 'note-edit';
   editingKnowledgeNoteId.value = note.id;
   editingKnowledgeNoteTitle.value = note.title;
   editingKnowledgeNoteContent.value = note.content;
@@ -430,6 +535,8 @@ function saveKnowledgeNoteEditing() {
     return;
   }
 
+  selectedKnowledgeNoteId.value = updatedNote.id;
+  knowledgeInspectorMode.value = 'note-view';
   cancelKnowledgeNoteEditing();
   refreshKnowledgeData();
 }
@@ -443,7 +550,12 @@ function removeKnowledgeNote(note: KnowledgeNote) {
 
   deleteKnowledgeNote(note.id);
 
-  if (editingKnowledgeNoteId.value === note.id) {
+  if (
+    editingKnowledgeNoteId.value === note.id ||
+    selectedKnowledgeNoteId.value === note.id
+  ) {
+    selectedKnowledgeNoteId.value = null;
+    knowledgeInspectorMode.value = 'base';
     cancelKnowledgeNoteEditing();
   }
 
@@ -474,6 +586,14 @@ function setActivePark(park: ActivePark) {
   activePark.value = park;
   cancelEditing();
   cancelKnowledgeNoteEditing();
+
+  if (park !== 'knowledge') {
+    knowledgeDrawerOpen.value = false;
+  }
+
+  if (park === 'knowledge' && activeKnowledgeBase.value && !selectedKnowledgeNote.value) {
+    knowledgeInspectorMode.value = 'base';
+  }
 }
 
 function saveDraft() {
@@ -646,33 +766,62 @@ async function submitAgentMessage() {
 
 <template>
   <main class="journal-app">
-    <section class="hero-panel" aria-labelledby="app-title">
-      <div>
-        <p class="eyebrow">{{ activeParkSummary.eyebrow }}</p>
-        <h1 id="app-title">{{ activeParkSummary.title }}</h1>
-        <p class="today-line">{{ activeParkSummary.description }}</p>
+    <section
+      class="hero-panel"
+      :class="{ 'knowledge-hero-panel': activePark === 'knowledge' }"
+      aria-labelledby="app-title"
+    >
+      <div class="hero-main">
+        <nav class="park-switcher" aria-label="记录 Park">
+          <button
+            v-for="park in parkSummaries"
+            :key="park.id"
+            type="button"
+            :class="{ active: activePark === park.id }"
+            @click="setActivePark(park.id)"
+          >
+            <span>{{ park.label }}</span>
+          </button>
+        </nav>
+
+        <template v-if="activePark === 'knowledge'">
+          <div class="knowledge-hero-title">
+            <button
+              class="icon-button knowledge-drawer-toggle"
+              type="button"
+              :aria-expanded="knowledgeDrawerOpen"
+              aria-controls="knowledge-drawer"
+              @click="toggleKnowledgeDrawer"
+            >
+              <span class="knowledge-drawer-icon" aria-hidden="true">
+                <i></i>
+                <i></i>
+                <i></i>
+              </span>
+            </button>
+            <h1 id="app-title" class="knowledge-page-title">{{ activeParkSummary.title }}</h1>
+          </div>
+        </template>
+
+        <template v-else>
+          <div>
+            <h1 id="app-title">{{ activeParkSummary.title }}</h1>
+            <p class="today-line">{{ activeParkSummary.description }}</p>
+          </div>
+        </template>
       </div>
 
-      <div class="header-actions" aria-label="快捷操作">
+      <div
+        v-if="activePark === 'journal'"
+        class="header-actions"
+        aria-label="快捷操作"
+      >
         <div class="today-pill">
           <span>{{ activeParkSummary.metricValue }}</span>
           <small>{{ activeParkSummary.metricLabel }}</small>
         </div>
       </div>
     </section>
-
-    <nav class="park-switcher" aria-label="记录 Park">
-      <button
-        v-for="park in parkSummaries"
-        :key="park.id"
-        type="button"
-        :class="{ active: activePark === park.id }"
-        @click="setActivePark(park.id)"
-      >
-        <span>{{ park.label }}</span>
-        <small>{{ park.caption }}</small>
-      </button>
-    </nav>
 
     <section
       v-if="activePark === 'journal'"
@@ -704,13 +853,7 @@ async function submitAgentMessage() {
       </nav>
 
       <section v-if="activeView === 'timeline'" class="compose-card" aria-labelledby="compose-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">新的记录</p>
-          <h2 id="compose-title">今天想记点什么？</h2>
-        </div>
-        <span class="counter">{{ draftCharacterCount }} 字</span>
-      </div>
+      <h2 id="compose-title" class="journal-section-title">今天想记点什么？</h2>
 
       <input
         v-model="draftTitle"
@@ -896,13 +1039,7 @@ async function submitAgentMessage() {
     </section>
 
     <section v-if="activeView === 'timeline'" class="timeline" aria-labelledby="timeline-title">
-      <div class="section-heading compact">
-        <div>
-          <p class="eyebrow">回顾</p>
-          <h2 id="timeline-title">日志时间线</h2>
-        </div>
-        <span class="counter">{{ entries.length }} 条</span>
-      </div>
+      <h2 id="timeline-title" class="journal-section-title">日志时间线</h2>
 
       <div v-if="entries.length === 0" class="empty-state">
         <p>还没有日志。</p>
@@ -952,138 +1089,184 @@ async function submitAgentMessage() {
     <section
       v-else-if="activePark === 'knowledge'"
       class="knowledge-workspace"
-      aria-labelledby="knowledge-park-title"
+      aria-label="知识库工作区"
     >
-      <section class="tool-card" aria-labelledby="knowledge-park-title">
-        <div class="section-heading">
+      <button
+        v-if="knowledgeDrawerOpen"
+        class="knowledge-drawer-backdrop"
+        type="button"
+        aria-label="关闭仓库导航"
+        @click="closeKnowledgeDrawer"
+      ></button>
+
+      <aside
+        id="knowledge-drawer"
+        class="knowledge-sidebar"
+        :class="{ open: knowledgeDrawerOpen }"
+        aria-label="仓库导航"
+      >
+        <div class="section-heading compact knowledge-pane-heading knowledge-drawer-heading">
           <div>
-            <p class="eyebrow">知识库 Park</p>
-            <h2 id="knowledge-park-title">创建学习库</h2>
+            <p class="eyebrow">仓库</p>
+            <h2>知识仓库</h2>
           </div>
-          <span class="counter">{{ knowledgeBases.length }} 库</span>
-        </div>
-
-        <input
-          v-model="newKnowledgeBaseName"
-          class="title-input"
-          type="text"
-          maxlength="40"
-          placeholder="知识库名称，例如：GitHub 学习库"
-          aria-label="知识库名称"
-        />
-
-        <textarea
-          v-model="newKnowledgeBaseDescription"
-          class="journal-input knowledge-description-input"
-          placeholder="这个库用来沉淀哪类知识？"
-          rows="3"
-        />
-
-        <input
-          v-model="newKnowledgeBaseTags"
-          class="search-input compact-input"
-          type="text"
-          placeholder="标签，可选，用逗号分隔"
-          aria-label="知识库标签"
-        />
-
-        <button
-          class="primary-action"
-          type="button"
-          :disabled="!canCreateKnowledgeBase"
-          @click="saveNewKnowledgeBase"
-        >
-          新建知识库
-        </button>
-      </section>
-
-      <section class="knowledge-layout" aria-label="知识库工作区">
-        <aside class="tool-card knowledge-sidebar" aria-label="知识库列表">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">学习库</p>
-              <h2>知识库列表</h2>
-            </div>
-            <span class="counter">{{ knowledgeNoteCount }} 条</span>
-          </div>
-
-          <div v-if="knowledgeBases.length === 0" class="empty-state">
-            <p>还没有知识库。</p>
-            <span>先创建一个“GitHub 学习库”，再往里面追加知识记录。</span>
-          </div>
-
-          <div v-else class="knowledge-base-list">
-            <button
-              v-for="base in knowledgeBases"
-              :key="base.id"
-              type="button"
-              :class="{ active: base.id === activeKnowledgeBaseId }"
-              @click="selectKnowledgeBase(base.id)"
-            >
-              <strong>{{ base.name }}</strong>
-              <span>{{ getKnowledgeNoteCount(base.id) }} 条记录</span>
-              <small>
-                {{ getDateGroupLabel(base.updatedAt) }} · {{ formatEntryTime(base.updatedAt) }}
-              </small>
-              <small v-if="base.tags.length > 0">{{ base.tags.join(' / ') }}</small>
+          <div class="knowledge-pane-actions">
+            <span class="counter">{{ knowledgeBases.length }} 库</span>
+            <button class="ghost-action" type="button" @click="closeKnowledgeDrawer">
+              关闭
             </button>
           </div>
-        </aside>
+        </div>
 
-        <section
-          v-if="activeKnowledgeBase"
-          class="tool-card knowledge-detail"
-          aria-labelledby="active-knowledge-base-title"
+        <div v-if="knowledgeBases.length === 0" class="empty-state knowledge-empty-state">
+          <p>还没有仓库。</p>
+          <span>先建一个仓库，再往里面慢慢积累知识笔记。</span>
+        </div>
+
+        <div v-else class="knowledge-base-list">
+          <button
+            v-for="base in knowledgeBases"
+            :key="base.id"
+            type="button"
+            :class="{ active: base.id === activeKnowledgeBaseId }"
+            @click="selectKnowledgeBase(base.id)"
+          >
+            <strong>{{ base.name }}</strong>
+            <span>{{ getKnowledgeNoteCount(base.id) }} 条笔记</span>
+            <small>
+              {{ getDateGroupLabel(base.updatedAt) }} · {{ formatEntryTime(base.updatedAt) }}
+            </small>
+            <small v-if="base.tags.length > 0">{{ base.tags.join(' / ') }}</small>
+          </button>
+        </div>
+
+        <div class="knowledge-sidebar-footer">
+          <button
+            v-if="activeKnowledgeBase"
+            class="ghost-action knowledge-sidebar-manage"
+            type="button"
+            @click="startKnowledgeBaseEditing"
+          >
+            编辑当前仓库
+          </button>
+          <button
+            class="ghost-action knowledge-sidebar-add"
+            type="button"
+            @click="openKnowledgeBaseComposer"
+          >
+            添加新仓库
+          </button>
+        </div>
+
+        <form
+          v-if="knowledgeBaseComposerOpen"
+          class="knowledge-base-composer"
+          @submit.prevent="saveNewKnowledgeBase"
         >
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">当前知识库</p>
-              <h2 id="active-knowledge-base-title">{{ activeKnowledgeBase.name }}</h2>
-            </div>
-            <span class="counter">{{ activeKnowledgeNotes.length }} 条</span>
+          <input
+            v-model="newKnowledgeBaseName"
+            class="title-input"
+            type="text"
+            maxlength="40"
+            placeholder="仓库名称，例如：GitHub 学习库"
+            aria-label="知识库名称"
+          />
+          <textarea
+            v-model="newKnowledgeBaseDescription"
+            class="journal-input knowledge-description-input"
+            placeholder="这个仓库要沉淀什么内容？"
+            rows="3"
+          />
+          <input
+            v-model="newKnowledgeBaseTags"
+            class="search-input compact-input"
+            type="text"
+            placeholder="标签，可选，用逗号分隔"
+            aria-label="知识库标签"
+          />
+          <div class="entry-actions">
+            <button
+              v-if="knowledgeBases.length > 0"
+              class="ghost-action"
+              type="button"
+              @click="closeKnowledgeBaseComposer"
+            >
+              取消
+            </button>
+            <button
+              class="primary-action small"
+              type="submit"
+              :disabled="!canCreateKnowledgeBase"
+            >
+              保存仓库
+            </button>
+          </div>
+        </form>
+      </aside>
+
+      <section class="knowledge-shell" aria-label="知识笔记工作台">
+        <section class="knowledge-notes-pane" aria-labelledby="knowledge-notes-title">
+          <div class="section-heading compact knowledge-pane-heading">
+            <h2 id="knowledge-notes-title">
+              {{ activeKnowledgeBase ? activeKnowledgeBase.name : '选择仓库' }}
+            </h2>
           </div>
 
-          <div class="knowledge-edit-panel">
-            <input
-              v-model="editingKnowledgeBaseName"
-              class="title-input"
-              type="text"
-              maxlength="40"
-              aria-label="编辑知识库名称"
-            />
-            <textarea
-              v-model="editingKnowledgeBaseDescription"
-              class="journal-input knowledge-description-input"
-              placeholder="知识库简介，可选"
-              rows="3"
-            />
-            <input
-              v-model="editingKnowledgeBaseTags"
-              class="search-input compact-input"
-              type="text"
-              placeholder="标签，用逗号分隔"
-              aria-label="编辑知识库标签"
-            />
-            <div class="entry-actions">
-              <button class="delete-action" type="button" @click="removeKnowledgeBase(activeKnowledgeBase)">
-                删除知识库
-              </button>
-              <button
-                class="primary-action small"
-                type="button"
-                :disabled="!canSaveKnowledgeBase"
-                @click="saveKnowledgeBaseDetails"
-              >
-                保存知识库
-              </button>
-            </div>
+          <div v-if="!activeKnowledgeBase" class="empty-state knowledge-empty-state">
+            <p>先从左上角打开仓库列表。</p>
+            <span>选中一个仓库之后，这里才会显示对应笔记。</span>
+            <button class="ghost-action knowledge-empty-action" type="button" @click="openKnowledgeDrawer">
+              打开仓库列表
+            </button>
           </div>
 
-          <section class="knowledge-note-composer" aria-labelledby="knowledge-note-compose-title">
-            <div class="section-heading compact">
+          <div v-else-if="activeKnowledgeNotes.length === 0" class="empty-state knowledge-empty-state">
+            <p>这个仓库还没有笔记。</p>
+            <span>点右下角的浮动按钮，先写下第一条知识记录。</span>
+          </div>
+
+          <div v-else class="knowledge-note-items">
+            <button
+              v-for="note in activeKnowledgeNotes"
+              :key="note.id"
+              type="button"
+              class="knowledge-note-list-item"
+              :class="{ active: selectedKnowledgeNoteId === note.id }"
+              @click="selectKnowledgeNote(note)"
+            >
+              <span class="entry-time">
+                {{ getDateGroupLabel(note.updatedAt) }} · {{ formatEntryTime(note.updatedAt) }}
+              </span>
+              <strong>{{ note.title }}</strong>
+              <p>{{ note.content }}</p>
+              <small v-if="note.tags.length > 0">{{ note.tags.join(' / ') }}</small>
+            </button>
+          </div>
+
+          <button
+            v-if="activeKnowledgeBase"
+            class="knowledge-note-fab"
+            type="button"
+            aria-label="新增知识笔记"
+            @click="startKnowledgeNoteComposer"
+          >
+            +
+          </button>
+        </section>
+
+        <section class="knowledge-inspector" aria-labelledby="knowledge-inspector-title">
+          <template v-if="!activeKnowledgeBase">
+            <div class="empty-state knowledge-empty-state">
+              <p>这里会显示仓库或笔记详情。</p>
+              <span>先从左上角打开仓库列表，再选一条知识笔记。</span>
+            </div>
+          </template>
+
+          <template v-else-if="knowledgeInspectorMode === 'note-create'">
+            <div class="section-heading compact knowledge-pane-heading">
               <div>
-                <p class="eyebrow">新增知识</p>
-                <h2 id="knowledge-note-compose-title">追加一条知识记录</h2>
+                <p class="eyebrow">新笔记</p>
+                <h2 id="knowledge-inspector-title">写入 {{ activeKnowledgeBase.name }}</h2>
               </div>
             </div>
 
@@ -1099,7 +1282,7 @@ async function submitAgentMessage() {
               v-model="newKnowledgeNoteContent"
               class="journal-input"
               placeholder="写下知识点、操作步骤、理解、坑点或结论。"
-              rows="6"
+              rows="10"
             />
             <input
               v-model="newKnowledgeNoteSourceUrl"
@@ -1115,109 +1298,176 @@ async function submitAgentMessage() {
               placeholder="标签，可选，用逗号分隔"
               aria-label="知识记录标签"
             />
-            <button
-              class="primary-action"
-              type="button"
-              :disabled="!canCreateKnowledgeNote"
-              @click="saveNewKnowledgeNote"
-            >
-              保存知识记录
-            </button>
-          </section>
+            <div class="entry-actions">
+              <button class="ghost-action" type="button" @click="showKnowledgeBaseSummary">
+                取消
+              </button>
+              <button
+                class="primary-action small"
+                type="button"
+                :disabled="!canCreateKnowledgeNote"
+                @click="saveNewKnowledgeNote"
+              >
+                保存笔记
+              </button>
+            </div>
+          </template>
 
-          <section class="knowledge-note-list" aria-label="知识记录列表">
-            <div class="section-heading compact">
+          <template v-else-if="knowledgeInspectorMode === 'note-edit' && selectedKnowledgeNote">
+            <div class="section-heading compact knowledge-pane-heading">
               <div>
-                <p class="eyebrow">库内记录</p>
-                <h2>知识记录</h2>
+                <p class="eyebrow">编辑笔记</p>
+                <h2 id="knowledge-inspector-title">{{ selectedKnowledgeNote.title }}</h2>
               </div>
             </div>
 
-            <div v-if="activeKnowledgeNotes.length === 0" class="empty-state">
-              <p>这个知识库还是空的。</p>
-              <span>把第一条知识记录放进来，它就不会混进日记区。</span>
-            </div>
-
-            <div v-else class="knowledge-note-items">
-              <article
-                v-for="note in activeKnowledgeNotes"
-                :key="note.id"
-                class="entry-card knowledge-note-card"
+            <input
+              v-model="editingKnowledgeNoteTitle"
+              class="title-input"
+              type="text"
+              maxlength="80"
+              aria-label="编辑知识记录标题"
+            />
+            <textarea
+              v-model="editingKnowledgeNoteContent"
+              class="journal-input edit-input"
+              rows="10"
+            />
+            <input
+              v-model="editingKnowledgeNoteSourceUrl"
+              class="search-input compact-input"
+              type="url"
+              placeholder="来源链接，可选"
+              aria-label="编辑知识记录来源链接"
+            />
+            <input
+              v-model="editingKnowledgeNoteTags"
+              class="search-input compact-input"
+              type="text"
+              placeholder="标签，用逗号分隔"
+              aria-label="编辑知识记录标签"
+            />
+            <div class="entry-actions">
+              <button class="ghost-action" type="button" @click="selectKnowledgeNote(selectedKnowledgeNote)">
+                取消
+              </button>
+              <button
+                class="primary-action small"
+                type="button"
+                :disabled="!canSaveKnowledgeNote"
+                @click="saveKnowledgeNoteEditing"
               >
-                <template v-if="editingKnowledgeNoteId === note.id">
-                  <input
-                    v-model="editingKnowledgeNoteTitle"
-                    class="title-input"
-                    type="text"
-                    maxlength="80"
-                    aria-label="编辑知识记录标题"
-                  />
-                  <textarea
-                    v-model="editingKnowledgeNoteContent"
-                    class="journal-input edit-input"
-                    rows="7"
-                  />
-                  <input
-                    v-model="editingKnowledgeNoteSourceUrl"
-                    class="search-input compact-input"
-                    type="url"
-                    placeholder="来源链接，可选"
-                  />
-                  <input
-                    v-model="editingKnowledgeNoteTags"
-                    class="search-input compact-input"
-                    type="text"
-                    placeholder="标签，用逗号分隔"
-                  />
-                  <div class="entry-actions">
-                    <button class="ghost-action" type="button" @click="cancelKnowledgeNoteEditing">
-                      取消
-                    </button>
-                    <button
-                      class="primary-action small"
-                      type="button"
-                      :disabled="!canSaveKnowledgeNote"
-                      @click="saveKnowledgeNoteEditing"
-                    >
-                      保存修改
-                    </button>
-                  </div>
-                </template>
-
-                <template v-else>
-                  <button class="entry-body" type="button" @click="startKnowledgeNoteEditing(note)">
-                    <span class="entry-time">
-                      {{ formatEntryTime(note.updatedAt) }}
-                      <template v-if="note.sourceUrl"> · 有来源</template>
-                    </span>
-                    <strong>{{ note.title }}</strong>
-                    <p>{{ note.content }}</p>
-                  </button>
-
-                  <div v-if="note.tags.length > 0" class="tag-row">
-                    <span v-for="tag in note.tags" :key="tag">{{ tag }}</span>
-                  </div>
-
-                  <a
-                    v-if="note.sourceUrl"
-                    class="source-link"
-                    :href="note.sourceUrl"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    打开来源
-                  </a>
-
-                  <div class="entry-footer">
-                    <span>{{ note.content.length }} 字</span>
-                    <button class="delete-action" type="button" @click="removeKnowledgeNote(note)">
-                      删除
-                    </button>
-                  </div>
-                </template>
-              </article>
+                保存修改
+              </button>
             </div>
-          </section>
+          </template>
+
+          <template v-else-if="selectedKnowledgeNote">
+            <div class="section-heading compact knowledge-pane-heading">
+              <div>
+                <p class="eyebrow">笔记详情</p>
+                <h2 id="knowledge-inspector-title">{{ selectedKnowledgeNote.title }}</h2>
+              </div>
+              <span class="counter">{{ selectedKnowledgeNote.content.length }} 字</span>
+            </div>
+
+            <div class="knowledge-meta">
+              <span>
+                更新于
+                {{ getDateGroupLabel(selectedKnowledgeNote.updatedAt) }}
+                ·
+                {{ formatEntryTime(selectedKnowledgeNote.updatedAt) }}
+              </span>
+              <span v-if="selectedKnowledgeNote.sourceUrl">带来源链接</span>
+            </div>
+
+            <div
+              v-if="selectedKnowledgeNote.tags.length > 0"
+              class="tag-row knowledge-detail-tags"
+            >
+              <span v-for="tag in selectedKnowledgeNote.tags" :key="tag">{{ tag }}</span>
+            </div>
+
+            <p class="knowledge-note-content">{{ selectedKnowledgeNote.content }}</p>
+
+            <a
+              v-if="selectedKnowledgeNote.sourceUrl"
+              class="source-link"
+              :href="selectedKnowledgeNote.sourceUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              打开来源
+            </a>
+
+            <div class="entry-actions knowledge-detail-actions">
+              <button class="delete-action" type="button" @click="removeKnowledgeNote(selectedKnowledgeNote)">
+                删除
+              </button>
+              <button
+                class="primary-action small"
+                type="button"
+                @click="startKnowledgeNoteEditing(selectedKnowledgeNote)"
+              >
+                编辑
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="knowledgeInspectorMode === 'base-edit'">
+            <div class="section-heading compact knowledge-pane-heading">
+              <div>
+                <p class="eyebrow">编辑仓库</p>
+                <h2 id="knowledge-inspector-title">{{ activeKnowledgeBase.name }}</h2>
+              </div>
+            </div>
+
+            <input
+              v-model="editingKnowledgeBaseName"
+              class="title-input"
+              type="text"
+              maxlength="40"
+              aria-label="编辑知识库名称"
+            />
+            <textarea
+              v-model="editingKnowledgeBaseDescription"
+              class="journal-input knowledge-description-input"
+              placeholder="知识库简介，可选"
+              rows="5"
+            />
+            <input
+              v-model="editingKnowledgeBaseTags"
+              class="search-input compact-input"
+              type="text"
+              placeholder="标签，用逗号分隔"
+              aria-label="编辑知识库标签"
+            />
+            <div class="entry-actions">
+              <button class="delete-action" type="button" @click="removeKnowledgeBase(activeKnowledgeBase)">
+                删除仓库
+              </button>
+              <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="showKnowledgeBaseSummary">
+                  取消
+                </button>
+                <button
+                  class="primary-action small"
+                  type="button"
+                  :disabled="!canSaveKnowledgeBase"
+                  @click="saveKnowledgeBaseDetails"
+                >
+                  保存仓库
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="empty-state knowledge-empty-state">
+              <p>选择一条知识笔记。</p>
+              <span>右侧只显示具体笔记内容；要新建笔记就点列表区右下角的按钮。</span>
+            </div>
+          </template>
         </section>
       </section>
     </section>
