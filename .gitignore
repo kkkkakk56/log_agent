@@ -1,0 +1,34 @@
+.DS_Store
+
+# Node / web build outputs
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Xcode / Capacitor generated outputs
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Project-local generated folders
+journal-agent/node_modules/
+journal-agent/dist/
+journal-agent/build/
+journal-agent/ios/App/App/public/
+journal-agent/ios/App/App/capacitor.config.json
+journal-agent/ios/App/App/config.xml
+journal-agent/ios/App/build/
+journal-agent/ios/App/Pods/
+journal-agent/ios/App/output/
+journal-agent/ios/DerivedData/
+journal-agent/ios/capacitor-cordova-ios-plugins/

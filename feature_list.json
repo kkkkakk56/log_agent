@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "journal-agent",
+    "appName": "心记",
+    "root": "journal-agent",
+    "currentMilestone": "M2-local-journal"
+  },
+  "codexWorkflow": {
+    "defaultBranch": "main",
+    "iterationPolicy": "Pick one ready feature, implement it end-to-end, update this file and feature_list.md, run verification, create a focused commit, then push only when explicitly approved or autoPush is enabled.",
+    "autoCommit": true,
+    "autoPush": false,
+    "requiredVerification": [
+      "npm run build",
+      "npx cap sync ios"
+    ],
+    "optionalVerification": [
+      "xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination \"platform=iOS Simulator,name=iPhone 16,OS=18.4\" -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build"
+    ],
+    "commitMessagePattern": "<type>: <short feature summary>",
+    "safeCommitRules": [
+      "Do not commit node_modules, dist, Xcode DerivedData, or device-specific xcuserdata.",
+      "Do not push secrets, private keys, App Store Connect keys, certificates, or provisioning profiles.",
+      "Keep each commit focused on one feature or one repository-maintenance task.",
+      "Update the completed feature's status, acceptance notes, and verification evidence before committing."
+    ]
+  },
+  "statuses": [
+    "done",
+    "ready",
+    "planned",
+    "blocked",
+    "deferred"
+  ],
+  "features": [
+    {
+      "id": "F001",
+      "title": "Free Apple Account iPhone shell",
+      "status": "done",
+      "priority": 0,
+      "phase": "M0-device-shell",
+      "summary": "Run a minimal Capacitor/Vue shell app on an iPhone using Xcode and a free Apple Account.",
+      "dependsOn": [],
+      "acceptanceCriteria": [
+        "The app installs on a real iPhone through Xcode Run.",
+        "The app opens without a white screen.",
+        "The shell page displays the app name and version."
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "Completed before feature backlog formalization."
+    },
+    {
+      "id": "F002",
+      "title": "Local journal CRUD",
+      "status": "done",
+      "priority": 1,
+      "phase": "M2-local-journal",
+      "summary": "Create, list, edit, and soft-delete journal entries stored locally.",
+      "dependsOn": [
+        "F001"
+      ],
+      "acceptanceCriteria": [
+        "Users can create a text journal entry.",
+        "Entries persist after closing and reopening the app.",
+        "Users can edit existing entries.",
+        "Users can delete entries with confirmation.",
+        "Entries are grouped by date in the timeline."
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios",
+        "xcodebuild simulator build succeeded"
+      ],
+      "notes": "Implemented with localStorage behind src/storage/journalStore.ts."
+    },
+    {
+      "id": "F003",
+      "title": "Search and calendar lookup",
+      "status": "done",
+      "priority": 2,
+      "phase": "M2-local-journal",
+      "summary": "Add keyword search and monthly calendar lookup with marked days that contain journal entries.",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "Users can switch between timeline, search, and calendar views.",
+        "Search matches journal title, content, and tags.",
+        "Calendar shows current month with previous and next month navigation.",
+        "Days with entries are visually marked.",
+        "Marker intensity changes based on entry count.",
+        "Selecting a date displays entries from that day."
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios",
+        "xcodebuild simulator build succeeded"
+      ],
+      "notes": "1 entry shows a dot, 2-3 entries use a warm marker, and 4+ entries use a dark marker."
+    },
+    {
+      "id": "F004",
+      "title": "Repository hygiene and backlog system",
+      "status": "done",
+      "priority": 3,
+      "phase": "M1-workflow",
+      "summary": "Track features in machine-readable JSON and human-readable Markdown, and keep generated files out of git.",
+      "dependsOn": [],
+      "acceptanceCriteria": [
+        "feature_list.json exists and contains prioritized feature metadata.",
+        "feature_list.md exists and explains the iteration workflow.",
+        "Root .gitignore prevents generated build artifacts from being committed.",
+        "Already tracked Xcode build artifacts are removed from the git index while preserved locally."
+      ],
+      "verification": [
+        "git status --short",
+        "git ls-files journal-agent/build returns no files after cleanup",
+        "feature_list.json parses as JSON"
+      ],
+      "notes": "Backlog files were created and generated Xcode build artifacts were removed from git tracking while preserved locally."
+    },
+    {
+      "id": "F005",
+      "title": "Draft auto-save",
+      "status": "ready",
+      "priority": 4,
+      "phase": "M2-local-journal",
+      "summary": "Preserve unfinished draft text if the app is closed, refreshed, or backgrounded.",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "Unsubmitted draft text is restored after app restart.",
+        "Saving a journal entry clears the draft.",
+        "Users can manually clear the draft.",
+        "Draft storage is separate from saved journal entries."
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "Use a separate localStorage key such as journal-agent.draft.v1."
+    },
+    {
+      "id": "F006",
+      "title": "Export local data",
+      "status": "planned",
+      "priority": 5,
+      "phase": "M3-data-safety",
+      "summary": "Allow users to export journal entries as JSON and Markdown for backup.",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "Users can export all entries as JSON.",
+        "Users can export readable Markdown.",
+        "Export excludes soft-deleted entries by default.",
+        "Export includes createdAt and updatedAt metadata."
+      ],
+      "verification": [
+        "npm run build"
+      ],
+      "notes": "Capacitor file sharing can be considered later; browser download is enough for the first pass."
+    },
+    {
+      "id": "F007",
+      "title": "Mood and tags",
+      "status": "planned",
+      "priority": 6,
+      "phase": "M3-organization",
+      "summary": "Add lightweight mood and tag metadata to entries.",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "Users can choose one mood for an entry.",
+        "Users can add and remove tags.",
+        "Timeline cards display mood and tags.",
+        "Search includes tags.",
+        "Calendar can optionally color days by dominant mood."
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "Data model already has mood and tags fields."
+    },
+    {
+      "id": "F008",
+      "title": "Search polish",
+      "status": "planned",
+      "priority": 7,
+      "phase": "M3-organization",
+      "summary": "Improve search with highlighted matches, clear button, and result snippets.",
+      "dependsOn": [
+        "F003"
+      ],
+      "acceptanceCriteria": [
+        "Matched terms are visually highlighted.",
+        "A clear button resets the query.",
+        "Long entries show a relevant snippet around the match.",
+        "Search remains fast for at least 1000 local entries."
+      ],
+      "verification": [
+        "npm run build"
+      ],
+      "notes": "Avoid adding heavy search dependencies until needed."
+    },
+    {
+      "id": "F009",
+      "title": "IndexedDB storage adapter",
+      "status": "planned",
+      "priority": 8,
+      "phase": "M4-storage",
+      "summary": "Move from localStorage to an async storage adapter suited for larger journal history.",
+      "dependsOn": [
+        "F002",
+        "F006"
+      ],
+      "acceptanceCriteria": [
+        "Storage API is async and typed.",
+        "Existing localStorage entries migrate once.",
+        "Users do not lose existing entries.",
+        "The app handles migration failure gracefully."
+      ],
+      "verification": [
+        "npm run build",
+        "manual migration test with existing localStorage data"
+      ],
+      "notes": "Do this before images, audio, or very large entries."
+    },
+    {
+      "id": "F010",
+      "title": "iCloud sync design spike",
+      "status": "planned",
+      "priority": 9,
+      "phase": "M5-sync",
+      "summary": "Research and design CloudKit/iCloud sync architecture before implementation.",
+      "dependsOn": [
+        "F006",
+        "F009"
+      ],
+      "acceptanceCriteria": [
+        "Document Apple Developer Program requirements.",
+        "Choose CloudKit data model and conflict strategy.",
+        "Define local-first sync states.",
+        "Identify required native capabilities and entitlements."
+      ],
+      "verification": [
+        "Design doc reviewed"
+      ],
+      "notes": "Implementation likely requires Apple Developer Program."
+    },
+    {
+      "id": "F011",
+      "title": "Privacy lock",
+      "status": "planned",
+      "priority": 10,
+      "phase": "M6-privacy",
+      "summary": "Protect the app with Face ID / passcode style local authentication.",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "Users can enable or disable app lock.",
+        "App requests authentication when opened.",
+        "Failure leaves journal content hidden.",
+        "Fallback behavior is documented."
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios",
+        "manual iPhone test"
+      ],
+      "notes": "Requires a Capacitor/native authentication plugin or custom native bridge."
+    },
+    {
+      "id": "F012",
+      "title": "TestFlight distribution",
+      "status": "planned",
+      "priority": 11,
+      "phase": "M7-distribution",
+      "summary": "Move from free-account local install to TestFlight distribution.",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "Apple Developer Program is active.",
+        "App Store Connect app record exists.",
+        "Xcode Archive uploads successfully.",
+        "Internal TestFlight install works on iPhone."
+      ],
+      "verification": [
+        "Archive upload success",
+        "TestFlight install success"
+      ],
+      "notes": "Only needed when local Xcode Run becomes too limiting."
+    }
+  ]
+}
