@@ -39,7 +39,19 @@ import {
   startOfMonth,
 } from './utils/date';
 
+type ActivePark = 'journal' | 'knowledge' | 'lab' | 'plan';
 type ActiveView = 'timeline' | 'search' | 'calendar';
+
+interface ParkSummary {
+  id: ActivePark;
+  label: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  caption: string;
+  metricValue: string;
+  metricLabel: string;
+}
 
 function createAgentWelcomeMessage(): AgentChatMessage {
   return createAgentMessage(
@@ -57,6 +69,7 @@ if (initialAgentConversations.length === 0) {
 }
 
 const entries = ref<JournalEntry[]>(getEntries());
+const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
 const draftTitle = ref('');
 const draftContent = ref('');
@@ -92,6 +105,55 @@ const todayCount = computed(() => {
 
   return entryCountByDate.value.get(today) ?? 0;
 });
+
+const parkSummaries = computed<ParkSummary[]>(() => [
+  {
+    id: 'journal',
+    label: '日记区',
+    eyebrow: '个人记录',
+    title: '心记',
+    description: formatTodayHeader(),
+    caption: '写下每天发生的事',
+    metricValue: String(todayCount.value),
+    metricLabel: '今日',
+  },
+  {
+    id: 'knowledge',
+    label: '知识库',
+    eyebrow: '学习资料',
+    title: '知识库',
+    description: '学习库和知识记录会放在这里，不混入日记时间线。',
+    caption: '整理长期知识',
+    metricValue: 'Park',
+    metricLabel: '独立',
+  },
+  {
+    id: 'lab',
+    label: '项目实验库',
+    eyebrow: '进度追踪',
+    title: '项目实验库',
+    description: '项目、实验、决策和复盘会在这里聚合。',
+    caption: '项目与实验',
+    metricValue: 'Park',
+    metricLabel: '规划',
+  },
+  {
+    id: 'plan',
+    label: '计划区',
+    eyebrow: '未来安排',
+    title: '计划区',
+    description: '目标、计划和待办后续会进入这里。',
+    caption: '目标与计划',
+    metricValue: 'Park',
+    metricLabel: '规划',
+  },
+]);
+
+const activeParkSummary = computed(
+  () =>
+    parkSummaries.value.find((park) => park.id === activePark.value) ??
+    parkSummaries.value[0],
+);
 
 const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(() => draftCharacterCount.value > 0);
@@ -173,6 +235,11 @@ function refreshAgentConversations() {
 
 function setActiveView(view: ActiveView) {
   activeView.value = view;
+  cancelEditing();
+}
+
+function setActivePark(park: ActivePark) {
+  activePark.value = park;
   cancelEditing();
 }
 
@@ -348,44 +415,62 @@ async function submitAgentMessage() {
   <main class="journal-app">
     <section class="hero-panel" aria-labelledby="app-title">
       <div>
-        <p class="eyebrow">今日</p>
-        <h1 id="app-title">心记</h1>
-        <p class="today-line">{{ formatTodayHeader() }}</p>
+        <p class="eyebrow">{{ activeParkSummary.eyebrow }}</p>
+        <h1 id="app-title">{{ activeParkSummary.title }}</h1>
+        <p class="today-line">{{ activeParkSummary.description }}</p>
       </div>
 
       <div class="header-actions" aria-label="快捷操作">
         <div class="today-pill">
-          <span>{{ todayCount }}</span>
-          <small>今日</small>
+          <span>{{ activeParkSummary.metricValue }}</span>
+          <small>{{ activeParkSummary.metricLabel }}</small>
         </div>
       </div>
     </section>
 
-    <nav class="view-switcher" aria-label="日志视图">
+    <nav class="park-switcher" aria-label="记录 Park">
       <button
+        v-for="park in parkSummaries"
+        :key="park.id"
         type="button"
-        :class="{ active: activeView === 'timeline' }"
-        @click="setActiveView('timeline')"
+        :class="{ active: activePark === park.id }"
+        @click="setActivePark(park.id)"
       >
-        时间线
-      </button>
-      <button
-        type="button"
-        :class="{ active: activeView === 'search' }"
-        @click="setActiveView('search')"
-      >
-        搜索
-      </button>
-      <button
-        type="button"
-        :class="{ active: activeView === 'calendar' }"
-        @click="setActiveView('calendar')"
-      >
-        日历
+        <span>{{ park.label }}</span>
+        <small>{{ park.caption }}</small>
       </button>
     </nav>
 
-    <section v-if="activeView === 'timeline'" class="compose-card" aria-labelledby="compose-title">
+    <section
+      v-if="activePark === 'journal'"
+      class="park-workspace journal-workspace"
+      aria-label="日记区"
+    >
+      <nav class="view-switcher" aria-label="日志视图">
+        <button
+          type="button"
+          :class="{ active: activeView === 'timeline' }"
+          @click="setActiveView('timeline')"
+        >
+          时间线
+        </button>
+        <button
+          type="button"
+          :class="{ active: activeView === 'search' }"
+          @click="setActiveView('search')"
+        >
+          搜索
+        </button>
+        <button
+          type="button"
+          :class="{ active: activeView === 'calendar' }"
+          @click="setActiveView('calendar')"
+        >
+          日历
+        </button>
+      </nav>
+
+      <section v-if="activeView === 'timeline'" class="compose-card" aria-labelledby="compose-title">
       <div class="section-heading">
         <div>
           <p class="eyebrow">新的记录</p>
@@ -627,6 +712,101 @@ async function submitAgentMessage() {
             </template>
           </article>
         </section>
+      </div>
+    </section>
+    </section>
+
+    <section
+      v-else-if="activePark === 'knowledge'"
+      class="park-placeholder"
+      aria-labelledby="knowledge-park-title"
+    >
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">独立 Park</p>
+          <h2 id="knowledge-park-title">知识库从这里进入</h2>
+        </div>
+        <span class="counter">F022</span>
+      </div>
+
+      <div class="park-intro">
+        <p>
+          日记区只保留日常记录。知识笔记会在这里按知识库和学习库组织，例如
+          “GitHub 学习库”。
+        </p>
+      </div>
+
+      <div class="park-boundary-list" aria-label="知识库 Park 边界">
+        <div>
+          <strong>知识库列表</strong>
+          <span>创建多个学习库，每个库都有自己的名称、简介和更新时间。</span>
+        </div>
+        <div>
+          <strong>知识记录</strong>
+          <span>进入某个库后，再追加标题、正文、来源链接和标签。</span>
+        </div>
+        <div>
+          <strong>与日记隔开</strong>
+          <span>知识笔记不会出现在日记时间线，普通日记也不会进入知识库。</span>
+        </div>
+      </div>
+    </section>
+
+    <section
+      v-else-if="activePark === 'lab'"
+      class="park-placeholder"
+      aria-labelledby="lab-park-title"
+    >
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">后续 Park</p>
+          <h2 id="lab-park-title">项目实验库</h2>
+        </div>
+        <span class="counter">规划中</span>
+      </div>
+
+      <div class="park-intro">
+        <p>项目进展、实验观察、关键决策和阶段复盘会在这里聚合。</p>
+      </div>
+
+      <div class="park-boundary-list" aria-label="项目实验库 Park 边界">
+        <div>
+          <strong>实验进度</strong>
+          <span>按主题持续记录目标、过程、观察、结果和下一步。</span>
+        </div>
+        <div>
+          <strong>项目记录</strong>
+          <span>按项目聚合目标、里程碑、问题、决策和复盘。</span>
+        </div>
+      </div>
+    </section>
+
+    <section
+      v-else-if="activePark === 'plan'"
+      class="park-placeholder"
+      aria-labelledby="plan-park-title"
+    >
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">后续 Park</p>
+          <h2 id="plan-park-title">计划区</h2>
+        </div>
+        <span class="counter">规划中</span>
+      </div>
+
+      <div class="park-intro">
+        <p>目标、计划、待办和周期回顾后续会放在这里，和日记、知识笔记分开。</p>
+      </div>
+
+      <div class="park-boundary-list" aria-label="计划区 Park 边界">
+        <div>
+          <strong>目标与计划</strong>
+          <span>承载短期安排、长期目标和计划拆解。</span>
+        </div>
+        <div>
+          <strong>后续关联</strong>
+          <span>可以再和日记复盘、项目进度、Agent 提醒联动。</span>
+        </div>
       </div>
     </section>
 

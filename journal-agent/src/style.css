@@ -100,7 +100,9 @@ button {
 }
 
 .hero-panel,
+.park-switcher,
 .view-switcher,
+.park-placeholder,
 .compose-card,
 .tool-card,
 .timeline {
@@ -228,6 +230,80 @@ h3 {
   font-weight: 650;
 }
 
+.park-switcher {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.park-switcher button {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 18px;
+  padding: 11px 10px;
+  background: rgba(255, 255, 255, 0.58);
+  color: #3a3a3c;
+  cursor: pointer;
+  text-align: left;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.88) inset,
+    0 12px 28px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(20px);
+  transform: translateZ(0);
+  transition:
+    background 240ms var(--motion-ease),
+    border-color 220ms var(--motion-ease),
+    box-shadow 260ms var(--motion-ease),
+    color 220ms var(--motion-ease),
+    transform 190ms var(--motion-press);
+  will-change: transform;
+}
+
+.park-switcher button.active {
+  border-color: rgba(29, 29, 31, 0.12);
+  background: #1d1d1f;
+  color: #fff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 16px 34px rgba(0, 0, 0, 0.18);
+}
+
+.park-switcher button:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+.park-switcher span,
+.park-switcher small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.park-switcher span {
+  font-size: 15px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.park-switcher small {
+  color: #86868b;
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1.25;
+}
+
+.park-switcher button.active small {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.park-workspace {
+  animation: soft-enter 320ms var(--motion-spring) both;
+}
+
 .view-switcher {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -270,6 +346,7 @@ h3 {
 
 .compose-card,
 .tool-card,
+.park-placeholder,
 .timeline {
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 28px;
@@ -283,7 +360,8 @@ h3 {
 }
 
 .compose-card,
-.tool-card {
+.tool-card,
+.park-placeholder {
   padding: 22px;
 }
 
@@ -310,6 +388,44 @@ h3 {
   color: #6e6e73;
   font-size: 13px;
   font-weight: 720;
+}
+
+.park-intro {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(242, 242, 247, 0.72);
+}
+
+.park-intro p {
+  color: #3a3a3c;
+  font-size: 16px;
+  font-weight: 560;
+  line-height: 1.65;
+}
+
+.park-boundary-list {
+  display: grid;
+  gap: 10px;
+}
+
+.park-boundary-list div {
+  display: grid;
+  gap: 5px;
+  padding: 14px 0;
+  border-top: 1px solid rgba(60, 60, 67, 0.1);
+}
+
+.park-boundary-list strong {
+  color: #1d1d1f;
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.park-boundary-list span {
+  color: #6e6e73;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .title-input,
@@ -1103,12 +1219,17 @@ h3 {
 
 @media (hover: hover) {
   .icon-button:hover,
+  .park-switcher button:hover,
   .ghost-action:hover,
   .month-action:hover,
   .panel-close:hover,
   .agent-conversation-list button:hover {
     background: rgba(255, 255, 255, 0.92);
     transform: translateY(-1px);
+  }
+
+  .park-switcher button.active:hover {
+    background: #1d1d1f;
   }
 
   .primary-action:not(:disabled):hover,
@@ -1177,8 +1298,18 @@ h3 {
     height: 52px;
   }
 
+  .park-switcher {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .park-switcher button {
+    min-height: 58px;
+    border-radius: 16px;
+  }
+
   .compose-card,
   .tool-card,
+  .park-placeholder,
   .timeline {
     border-radius: 26px;
     padding: 18px;

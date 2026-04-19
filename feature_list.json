@@ -5,7 +5,7 @@
     "appName": "心记",
     "root": "journal-agent",
     "currentMilestone": "M2-local-journal",
-    "description": "一个先本地可用、后续再扩展同步和分发能力的个人日志 App。"
+    "description": "一个先本地可用、后续用多个独立 Park 组织日记、知识库、项目实验库、计划等内容的个人信息 App。"
   },
   "codexWorkflow": {
     "defaultBranch": "main",
@@ -367,6 +367,121 @@
       "passes": false,
       "verify_cmd": "cd journal-agent && npm run build",
       "notes": "先不要引入重型搜索库。"
+    },
+    {
+      "id": "TASK-017",
+      "featureId": "F021",
+      "category": "feature",
+      "description": "记录 Park 框架：把日记区、知识库区、项目实验库和计划区设计为彼此隔开的顶层区域",
+      "status": "done",
+      "priority": 6,
+      "dependsOn": [
+        "F002"
+      ],
+      "steps": [
+        "定义 Park 概念：日记区、知识库区、项目实验库、计划区等顶层区域",
+        "日记内容继续留在日记区，不混入知识库列表",
+        "知识库区拥有独立入口，用于承载多个知识库和知识记录",
+        "项目实验库先作为后续入口或占位 Park，用于承载实验进度和项目记录",
+        "计划区先作为后续入口或占位 Park，用于承载待办、目标或计划类记录",
+        "不同 Park 在导航、数据归属、搜索筛选和 Agent 读取来源上都要能区分",
+        "第一版优先实现日记区与知识库区的分离，不强制迁移已有日志数据"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "已完成。新增顶层 Park 导航：日记区、知识库、项目实验库、计划区；现有日志时间线、搜索、日历继续留在日记区，知识库区和后续 Park 已独立展示。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "TASK-018",
+      "featureId": "F022",
+      "category": "feature",
+      "description": "知识库 Park 与知识笔记：用户可以进入独立知识库区域，创建学习库，并在每个知识库下持续追加知识记录",
+      "status": "ready",
+      "priority": 7,
+      "dependsOn": [
+        "F021"
+      ],
+      "steps": [
+        "首页或主导航中有独立的知识库 Park 入口，和日记区分开",
+        "用户可以创建一个知识库，例如“GitHub 学习库”",
+        "知识库可以设置名称、简介、标签和更新时间",
+        "进入某个知识库后，可以新增、编辑、删除该库下的知识记录",
+        "知识记录包含标题、正文、来源链接、标签和可选备注",
+        "知识库下的记录数量不设置产品层面的固定上限，实际容量受设备存储限制",
+        "知识库列表展示每个库的记录数量和最近更新时间",
+        "日记区不会展示知识笔记，知识库区也不会展示普通日记"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "用户描述的核心体验：先进入知识库 Park，开一个关于 GitHub 的学习库，再在该库下持续增加 GitHub 相关知识记录。"
+    },
+    {
+      "id": "TASK-019",
+      "featureId": "F023",
+      "category": "feature",
+      "description": "项目实验库里的实验进度记录：按实验主题持续记录目标、过程、观察、结果和下一步",
+      "status": "planned",
+      "priority": 8,
+      "dependsOn": [
+        "F021"
+      ],
+      "steps": [
+        "用户可以从项目实验库 Park 进入实验记录",
+        "用户可以创建一个实验记录集合",
+        "实验集合包含目标、假设、材料或环境、步骤、观察、结果和下一步",
+        "支持按时间追加实验进度，而不是只保存一篇静态笔记",
+        "实验进度可以标记状态：计划中、进行中、已暂停、已完成",
+        "列表中展示最近一次进展和当前状态"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "面向科研、学习实验、产品实验或个人测试流程。第一版先做文本记录，不强制结构化到复杂表格；归属在项目实验库 Park。"
+    },
+    {
+      "id": "TASK-020",
+      "featureId": "F024",
+      "category": "feature",
+      "description": "项目实验库里的项目记录：按项目聚合目标、进展、决策、问题和阶段性复盘",
+      "status": "planned",
+      "priority": 9,
+      "dependsOn": [
+        "F021"
+      ],
+      "steps": [
+        "用户可以从项目实验库 Park 进入项目记录",
+        "用户可以创建一个项目记录空间",
+        "项目包含目标、状态、里程碑、相关链接和标签",
+        "项目下可以追加进展记录、决策记录、问题记录和复盘记录",
+        "项目列表展示当前状态、最近更新和记录数量",
+        "支持从项目维度搜索相关记录"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "适合长期项目、学习计划、开发任务或个人事务管理；归属在项目实验库 Park。"
+    },
+    {
+      "id": "TASK-021",
+      "featureId": "F025",
+      "category": "feature",
+      "description": "多类型资料检索与 Agent 读取：让搜索和 Agent 能理解日志、知识库、实验、项目等不同记录来源",
+      "status": "planned",
+      "priority": 10,
+      "dependsOn": [
+        "F018",
+        "F022",
+        "F023",
+        "F024"
+      ],
+      "steps": [
+        "搜索结果展示记录类型和所属知识库、实验或项目",
+        "Agent 检索上下文时保留来源类型，避免把知识笔记和个人日志混淆",
+        "RAG 索引支持不同 record type 的 chunk 元数据",
+        "回答时可以引用来源，例如来自某个知识库或某个项目记录",
+        "用户可以选择只检索某一类资料"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build && npm run test:agent-api",
+      "notes": "这是知识库和项目记录真正变成个人资料库后的 Agent 增强任务。"
     }
   ],
   "features": [
@@ -745,10 +860,130 @@
       "notes": "在数据规模明显变大前，避免引入重型搜索依赖。"
     },
     {
+      "id": "F021",
+      "title": "记录 Park 框架",
+      "status": "done",
+      "priority": 6,
+      "phase": "M3-record-hub",
+      "summary": "把 App 从单一日志扩展为多个彼此隔开的顶层区域，例如日记区、知识库区、项目实验库和计划区。",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "主界面能表达 Park 概念，至少区分日记区和知识库区。",
+        "日记内容继续留在日记区，不混入知识库列表。",
+        "知识库区拥有独立入口，用于承载多个知识库和知识记录。",
+        "项目实验库和计划区可以先作为后续 Park 记录在路线图中，不必第一版全部实现。",
+        "不同 Park 在导航、数据归属、搜索筛选和 Agent 读取来源上都要能区分。",
+        "现有日志数据可以继续读取，不因新增 Park 丢失。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。新增顶层 Park 导航和分区页面：日记区继续承载现有日志功能，知识库、项目实验库、计划区作为独立 Park 出现。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F022",
+      "title": "知识库 Park 与知识笔记",
+      "status": "ready",
+      "priority": 7,
+      "phase": "M3-record-hub",
+      "summary": "用户可以进入独立知识库区域，按知识库或学习库分类，例如创建“GitHub 学习库”，并在该库下持续追加知识记录。",
+      "dependsOn": [
+        "F021"
+      ],
+      "acceptanceCriteria": [
+        "主界面或导航中有独立知识库 Park 入口，和日记区分开。",
+        "用户可以创建、重命名和删除知识库。",
+        "知识库包含名称、简介、标签、创建时间、更新时间和记录数量。",
+        "进入某个知识库后，用户可以新增、编辑、删除该库下的知识记录。",
+        "知识记录包含标题、正文、来源链接、标签和可选备注。",
+        "知识库下的记录数量不设置产品层面的固定上限，实际容量受设备存储限制。",
+        "知识库列表展示最近更新时间，方便继续学习。",
+        "日记区不会展示知识笔记，知识库区也不会展示普通日记。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "用户给出的典型场景：进入知识库 Park，开一个 GitHub 知识学习库，然后不断把 GitHub 相关知识点追加进去。"
+    },
+    {
+      "id": "F023",
+      "title": "实验进度记录",
+      "status": "planned",
+      "priority": 8,
+      "phase": "M3-record-hub",
+      "summary": "在项目实验库 Park 下，按实验主题持续记录目标、过程、观察、结果和下一步。",
+      "dependsOn": [
+        "F021"
+      ],
+      "acceptanceCriteria": [
+        "用户可以创建一个实验记录集合。",
+        "实验集合包含目标、假设、材料或环境、步骤、观察、结果和下一步。",
+        "用户可以按时间追加实验进展。",
+        "实验状态支持计划中、进行中、已暂停、已完成。",
+        "列表展示最近一次进展和当前状态。"
+      ],
+      "verification": [
+        "npm run build"
+      ],
+      "notes": "第一版先做轻量文本记录，不强制复杂表格。"
+    },
+    {
+      "id": "F024",
+      "title": "项目记录",
+      "status": "planned",
+      "priority": 9,
+      "phase": "M3-record-hub",
+      "summary": "在项目实验库 Park 下，按项目聚合目标、进展、决策、问题和阶段性复盘。",
+      "dependsOn": [
+        "F021"
+      ],
+      "acceptanceCriteria": [
+        "用户可以创建一个项目记录空间。",
+        "项目包含目标、状态、里程碑、相关链接和标签。",
+        "项目下可以追加进展记录、决策记录、问题记录和复盘记录。",
+        "项目列表展示当前状态、最近更新和记录数量。",
+        "搜索可以从项目维度找到相关记录。"
+      ],
+      "verification": [
+        "npm run build"
+      ],
+      "notes": "和实验记录的区别：项目更关注目标推进、决策和阶段性复盘。"
+    },
+    {
+      "id": "F025",
+      "title": "多类型资料检索与 Agent 读取",
+      "status": "planned",
+      "priority": 10,
+      "phase": "M3-agent-memory",
+      "summary": "让搜索和 Agent 能理解日志、知识库、实验、项目等不同记录来源，并基于来源回答。",
+      "dependsOn": [
+        "F018",
+        "F022",
+        "F023",
+        "F024"
+      ],
+      "acceptanceCriteria": [
+        "搜索结果展示记录类型和所属知识库、实验或项目。",
+        "Agent 检索上下文时保留来源类型。",
+        "RAG 索引支持不同 record type 的 chunk 元数据。",
+        "Agent 回答时可以说明信息来自哪个知识库、实验或项目。",
+        "用户可以选择只检索某一类资料。"
+      ],
+      "verification": [
+        "npm run build",
+        "npm run test:agent-api"
+      ],
+      "notes": "避免把个人日志、知识笔记和项目事实混在一起；来源类型要成为检索结果的一部分。"
+    },
+    {
       "id": "F009",
       "title": "IndexedDB 存储适配器",
       "status": "planned",
-      "priority": 12,
+      "priority": 17,
       "phase": "M4-storage",
       "summary": "从 localStorage 迁移到更适合大量日志的异步 IndexedDB 存储适配器。",
       "dependsOn": [
@@ -771,7 +1006,7 @@
       "id": "F010",
       "title": "iCloud 同步方案调研",
       "status": "planned",
-      "priority": 13,
+      "priority": 18,
       "phase": "M5-sync",
       "summary": "在实现前研究并设计 CloudKit/iCloud 同步架构。",
       "dependsOn": [
@@ -793,7 +1028,7 @@
       "id": "F011",
       "title": "隐私锁",
       "status": "planned",
-      "priority": 14,
+      "priority": 19,
       "phase": "M6-privacy",
       "summary": "用 Face ID / 密码式本地认证保护 App 内容。",
       "dependsOn": [
@@ -816,7 +1051,7 @@
       "id": "F012",
       "title": "TestFlight 分发",
       "status": "planned",
-      "priority": 15,
+      "priority": 20,
       "phase": "M7-distribution",
       "summary": "从免费账号本地安装，升级到 TestFlight 内测分发。",
       "dependsOn": [
