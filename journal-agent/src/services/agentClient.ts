@@ -14,15 +14,51 @@ interface SendAgentMessageOptions {
   entries: JournalEntry[];
 }
 
-export const AGENT_API_CONFIG = {
-  baseUrl: 'https://api.placeholder.local/v1/chat/completions',
-  apiKey: 'sk-placeholder-do-not-use-in-client',
-  model: 'journal-agent-placeholder-model',
+const normalizeChatEndpoint = (apiUrl: string): string => {
+  const normalizedUrl = apiUrl.trim().replace(/\/+$/, '');
+
+  if (!normalizedUrl) {
+    return '';
+  }
+
+  if (
+    normalizedUrl.endsWith('/chat/completions') ||
+    normalizedUrl.endsWith('/responses')
+  ) {
+    return normalizedUrl;
+  }
+
+  try {
+    const parsedUrl = new URL(normalizedUrl);
+
+    if (parsedUrl.pathname === '/') {
+      return `${parsedUrl.origin}/v1/chat/completions`;
+    }
+  } catch {
+    return normalizedUrl;
+  }
+
+  if (normalizedUrl.endsWith('/v1')) {
+    return `${normalizedUrl}/chat/completions`;
+  }
+
+  return normalizedUrl;
 };
 
-const isPlaceholderConfig = (): boolean =>
-  AGENT_API_CONFIG.baseUrl.includes('placeholder') ||
-  AGENT_API_CONFIG.apiKey.includes('placeholder');
+export const AGENT_API_CONFIG = {
+  baseUrl: normalizeChatEndpoint(import.meta.env.api_url ?? ''),
+  apiKey: import.meta.env.api_key ?? '',
+  model: import.meta.env.model ?? '',
+};
+
+export const isAgentUsingPlaceholder = (): boolean =>
+  !AGENT_API_CONFIG.baseUrl || !AGENT_API_CONFIG.apiKey || !AGENT_API_CONFIG.model;
+
+export const getAgentModeLabel = (): string =>
+  isAgentUsingPlaceholder() ? '占位模型' : '真实 API';
+
+export const getAgentModelLabel = (): string =>
+  AGENT_API_CONFIG.model || 'journal-agent-placeholder-model';
 
 const createId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -102,7 +138,7 @@ export const sendAgentMessage = async ({
     );
   }
 
-  if (isPlaceholderConfig()) {
+  if (isAgentUsingPlaceholder()) {
     await wait(520);
     return createAgentMessage(
       'assistant',
@@ -118,7 +154,7 @@ export const sendAgentMessage = async ({
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: AGENT_API_CONFIG.model,
+      model: getAgentModelLabel(),
       messages: messages.map((message) => ({
         role: message.role,
         content: message.content,

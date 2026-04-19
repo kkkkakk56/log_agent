@@ -256,6 +256,26 @@ Codex 会优先读取这些任务卡：
 - `npm run build` 通过。
 - `npx cap sync ios` 通过。
 
+### F015：真实大模型 API 接入测试
+
+状态：`done`
+
+从本地 `.env` 读取真实 API 配置，让 Agent 浮窗可以直接调用大模型，并提供命令行连通性测试。
+
+验收标准：
+
+- `.env` 被 `.gitignore` 忽略，不会提交 API Key。
+- Vite 可以读取根目录 `.env` 中的 `api_url`、`api_key`、`model`。
+- Agent 客户端在配置完整时使用真实 API，缺失时回退占位模式。
+- 提供 `npm run test:agent-api` 测试命令，测试时不打印密钥。
+- 聊天浮窗能显示当前是占位模型还是真实 API。
+
+验证结果：
+
+- `npm run build` 通过。
+- `npm run test:agent-api` 通过。
+- `npx cap sync ios` 通过。
+
 ## 准备实现
 
 ### F005：草稿自动保存

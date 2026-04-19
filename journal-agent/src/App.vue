@@ -3,8 +3,10 @@ import { computed, ref } from 'vue';
 import type { CalendarDay } from './utils/date';
 import type { JournalEntry } from './types/journal';
 import {
-  AGENT_API_CONFIG,
   createAgentMessage,
+  getAgentModeLabel,
+  getAgentModelLabel,
+  isAgentUsingPlaceholder,
   sendAgentMessage,
   type AgentChatMessage,
 } from './services/agentClient';
@@ -44,7 +46,9 @@ const agentIsThinking = ref(false);
 const agentMessages = ref<AgentChatMessage[]>([
   createAgentMessage(
     'assistant',
-    '你好，我是心记 Agent。现在我还在使用占位模型，但已经可以先陪你整理想法、生成日志提示，之后会接入真实 API。',
+    isAgentUsingPlaceholder()
+      ? '你好，我是心记 Agent。现在我还在使用占位模型，但已经可以先陪你整理想法、生成日志提示。'
+      : '你好，我是心记 Agent。已经检测到本地 .env API 配置，可以尝试调用真实模型。',
   ),
 ]);
 
@@ -69,7 +73,8 @@ const todayCount = computed(() => {
 
 const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(() => draftCharacterCount.value > 0);
-const agentModelLabel = computed(() => AGENT_API_CONFIG.model);
+const agentModeLabel = computed(() => getAgentModeLabel());
+const agentModelLabel = computed(() => getAgentModelLabel());
 const canSendAgentMessage = computed(
   () => agentInput.value.trim().length > 0 && !agentIsThinking.value,
 );
@@ -575,7 +580,7 @@ async function submitAgentMessage() {
             </span>
           </span>
           <div>
-            <p class="eyebrow">占位模型</p>
+            <p class="eyebrow">{{ agentModeLabel }}</p>
             <h2 id="agent-title">心记 Agent</h2>
             <span>{{ agentModelLabel }}</span>
           </div>

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:agent-api": "node scripts/test-agent-api.mjs"
   },
   "dependencies": {
     "@capacitor/cli": "^8.3.1",
