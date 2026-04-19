@@ -354,12 +354,6 @@ async function submitAgentMessage() {
       </div>
 
       <div class="header-actions" aria-label="快捷操作">
-        <button class="icon-button" type="button" @click="setActiveView('search')">
-          搜索
-        </button>
-        <button class="icon-button" type="button" @click="setActiveView('calendar')">
-          日历
-        </button>
         <div class="today-pill">
           <span>{{ todayCount }}</span>
           <small>今日</small>
