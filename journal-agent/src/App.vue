@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import type { CalendarDay } from './utils/date';
 import type { JournalEntry } from './types/journal';
 import type { KnowledgeBase, KnowledgeNote } from './types/knowledge';
 import type { LabProject, LabRecord, LabRecordType } from './types/lab';
+import type { RecordReminder, ReminderTargetType } from './types/reminder';
 import {
   createAgentMessage,
   getAgentModeLabel,
@@ -23,6 +24,14 @@ import {
   setActiveAgentConversationId,
   type AgentConversation,
 } from './storage/agentConversationStore';
+import {
+  cancelReminder,
+  cancelRemindersForTarget,
+  createReminder,
+  getActiveReminders,
+  getReminderById,
+  updateReminder,
+} from './storage/reminderStore';
 import {
   createEntry,
   deleteEntry,
@@ -49,6 +58,11 @@ import {
   updateLabProject,
   updateLabRecord,
 } from './storage/labStore';
+import {
+  cancelReminderNotification,
+  listenForReminderNotificationActions,
+  scheduleReminderNotification,
+} from './services/reminderNotifications';
 import {
   WEEKDAY_LABELS,
   addMonths,
@@ -85,6 +99,14 @@ interface ParkSummary {
   description: string;
   metricValue: string;
   metricLabel: string;
+}
+
+interface ReminderTargetDraft {
+  type: ReminderTargetType;
+  id: string;
+  parentId: string | null;
+  title: string;
+  content: string;
 }
 
 const LAB_RECORD_TYPE_META: Record<LabRecordType, { label: string }> = {
@@ -129,6 +151,7 @@ const knowledgeBases = ref<KnowledgeBase[]>(getKnowledgeBases());
 const knowledgeNotes = ref<KnowledgeNote[]>(getKnowledgeNotes());
 const labProjects = ref<LabProject[]>(getLabProjects());
 const labRecords = ref<LabRecord[]>(getLabRecords());
+const reminders = ref<RecordReminder[]>(getActiveReminders());
 const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
 const draftTitle = ref('');
@@ -186,6 +209,20 @@ const agentConversations = ref<AgentConversation[]>(getAgentConversations());
 const activeAgentConversationId = ref<string | null>(
   getActiveAgentConversationId(agentConversations.value),
 );
+const reminderComposerOpen = ref(false);
+const reminderEditingId = ref<string | null>(null);
+const reminderTarget = ref<ReminderTargetDraft | null>(null);
+const reminderScheduledAt = ref('');
+const reminderTitle = ref('');
+const reminderQuote = ref('');
+const reminderError = ref('');
+const reminderStatusMessage = ref('');
+const reminderIsSaving = ref(false);
+const highlightedReminderTarget = ref<{
+  targetType: ReminderTargetType;
+  targetId: string;
+  quote: string;
+} | null>(null);
 
 const groupedEntries = computed(() => groupEntriesByDate(entries.value));
 
@@ -351,6 +388,28 @@ const agentRecordContext = computed(() => {
 const canSendAgentMessage = computed(
   () => agentInput.value.trim().length > 0 && !agentIsThinking.value,
 );
+const activeReminders = computed(() =>
+  reminders.value.filter(
+    (reminder) =>
+      reminder.canceledAt === null &&
+      new Date(reminder.scheduledAt).getTime() > Date.now(),
+  ),
+);
+const visibleReminders = computed(() => activeReminders.value.slice(0, 4));
+const reminderMinDateTime = computed(() =>
+  toDateTimeLocalInputValue(new Date(Date.now() + 60_000)),
+);
+const canSaveReminder = computed(() => {
+  const scheduledAt = new Date(reminderScheduledAt.value);
+
+  return (
+    Boolean(reminderTarget.value) &&
+    !reminderIsSaving.value &&
+    reminderTitle.value.trim().length > 0 &&
+    !Number.isNaN(scheduledAt.getTime()) &&
+    scheduledAt.getTime() > Date.now()
+  );
+});
 
 const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLocaleLowerCase());
 
@@ -389,6 +448,404 @@ const selectedDateLabel = computed(() => {
 
 function refreshEntries() {
   entries.value = getEntries();
+}
+
+function refreshReminders() {
+  reminders.value = getActiveReminders();
+}
+
+function toDateTimeLocalInputValue(date: Date): string {
+  const timezoneOffset = date.getTimezoneOffset() * 60_000;
+  const localDate = new Date(date.getTime() - timezoneOffset);
+
+  return localDate.toISOString().slice(0, 16);
+}
+
+function getDefaultReminderDateTime(): string {
+  return toDateTimeLocalInputValue(new Date(Date.now() + 60 * 60_000));
+}
+
+function formatReminderDateTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function getTargetTypeLabel(targetType: ReminderTargetType): string {
+  if (targetType === 'journal-entry') {
+    return '心记';
+  }
+
+  if (targetType === 'knowledge-note') {
+    return '笔记';
+  }
+
+  return '做记';
+}
+
+function getSelectedQuote(content: string): { quote: string; anchorStart: number | null } {
+  const selectedText = window.getSelection()?.toString().trim() ?? '';
+
+  if (!selectedText || !content.includes(selectedText)) {
+    return {
+      quote: '',
+      anchorStart: null,
+    };
+  }
+
+  return {
+    quote: selectedText.slice(0, 180),
+    anchorStart: content.indexOf(selectedText),
+  };
+}
+
+function openReminderComposer(target: ReminderTargetDraft) {
+  const selectedQuote = getSelectedQuote(target.content);
+
+  reminderTarget.value = target;
+  reminderEditingId.value = null;
+  reminderScheduledAt.value = getDefaultReminderDateTime();
+  reminderTitle.value = `提醒：${target.title}`;
+  reminderQuote.value = selectedQuote.quote;
+  reminderError.value = '';
+  reminderStatusMessage.value = selectedQuote.quote
+    ? '已带入你选中的句子。'
+    : '可以直接设置整条记录提醒，也可以在下方填入要定位的那句话。';
+  reminderComposerOpen.value = true;
+}
+
+function openJournalReminderComposer(entry: JournalEntry) {
+  openReminderComposer({
+    type: 'journal-entry',
+    id: entry.id,
+    parentId: null,
+    title: entry.title || '未命名心记',
+    content: entry.content,
+  });
+}
+
+function openKnowledgeReminderComposer(note: KnowledgeNote) {
+  openReminderComposer({
+    type: 'knowledge-note',
+    id: note.id,
+    parentId: note.baseId,
+    title: note.title || '未命名笔记',
+    content: note.content,
+  });
+}
+
+function openLabReminderComposer(record: LabRecord) {
+  openReminderComposer({
+    type: 'lab-record',
+    id: record.id,
+    parentId: record.projectId,
+    title: record.title || '未命名做记',
+    content: record.content,
+  });
+}
+
+function closeReminderComposer() {
+  reminderComposerOpen.value = false;
+  reminderEditingId.value = null;
+  reminderTarget.value = null;
+  reminderScheduledAt.value = '';
+  reminderTitle.value = '';
+  reminderQuote.value = '';
+  reminderError.value = '';
+}
+
+function resolveReminderTarget(reminder: RecordReminder): ReminderTargetDraft | null {
+  if (reminder.targetType === 'journal-entry') {
+    const entry = entries.value.find((item) => item.id === reminder.targetId);
+
+    if (!entry) {
+      return null;
+    }
+
+    return {
+      type: 'journal-entry',
+      id: entry.id,
+      parentId: null,
+      title: entry.title || '未命名心记',
+      content: entry.content,
+    };
+  }
+
+  if (reminder.targetType === 'knowledge-note') {
+    const note = knowledgeNotes.value.find((item) => item.id === reminder.targetId);
+
+    if (!note) {
+      return null;
+    }
+
+    return {
+      type: 'knowledge-note',
+      id: note.id,
+      parentId: note.baseId,
+      title: note.title || '未命名笔记',
+      content: note.content,
+    };
+  }
+
+  const record = labRecords.value.find((item) => item.id === reminder.targetId);
+
+  if (!record) {
+    return null;
+  }
+
+  return {
+    type: 'lab-record',
+    id: record.id,
+    parentId: record.projectId,
+    title: record.title || '未命名做记',
+    content: record.content,
+  };
+}
+
+function startReminderEditing(reminder: RecordReminder) {
+  const target = resolveReminderTarget(reminder);
+
+  if (!target) {
+    reminderStatusMessage.value = '这条提醒对应的记录已经不可用。';
+    return;
+  }
+
+  reminderTarget.value = target;
+  reminderEditingId.value = reminder.id;
+  reminderScheduledAt.value = toDateTimeLocalInputValue(new Date(reminder.scheduledAt));
+  reminderTitle.value = reminder.reminderTitle;
+  reminderQuote.value = reminder.quote;
+  reminderError.value = '';
+  reminderStatusMessage.value = '正在修改已有提醒。';
+  reminderComposerOpen.value = true;
+}
+
+function scheduleSavedReminder(reminder: RecordReminder) {
+  void scheduleReminderNotification(reminder).then((scheduleResult) => {
+    reminderStatusMessage.value = scheduleResult.ok
+      ? scheduleResult.message
+      : `提醒已保存在 App 内，但系统通知暂未启动：${scheduleResult.message}`;
+    refreshReminders();
+  });
+}
+
+function saveReminder() {
+  if (reminderIsSaving.value) {
+    return;
+  }
+
+  if (!reminderTarget.value || !canSaveReminder.value) {
+    reminderError.value = '请填写提醒标题，并选择一个未来时间。';
+    return;
+  }
+
+  reminderIsSaving.value = true;
+  reminderError.value = '';
+
+  const anchorStart = reminderQuote.value.trim()
+    ? reminderTarget.value.content.indexOf(reminderQuote.value.trim())
+    : -1;
+  const normalizedAnchorStart = anchorStart >= 0 ? anchorStart : null;
+  const reminder =
+    reminderEditingId.value === null
+      ? createReminder({
+          targetType: reminderTarget.value.type,
+          targetId: reminderTarget.value.id,
+          parentId: reminderTarget.value.parentId,
+          targetTitle: reminderTarget.value.title,
+          reminderTitle: reminderTitle.value,
+          quote: reminderQuote.value,
+          anchorStart: normalizedAnchorStart,
+          scheduledAt: new Date(reminderScheduledAt.value).toISOString(),
+        })
+      : updateReminder(reminderEditingId.value, {
+          reminderTitle: reminderTitle.value,
+          quote: reminderQuote.value,
+          anchorStart: normalizedAnchorStart,
+          scheduledAt: new Date(reminderScheduledAt.value).toISOString(),
+        });
+
+  if (!reminder) {
+    reminderError.value = '提醒保存失败，请确认时间晚于当前时间。';
+    reminderIsSaving.value = false;
+    return;
+  }
+
+  reminderStatusMessage.value = '提醒已保存，正在交给系统通知。';
+  highlightedReminderTarget.value = {
+    targetType: reminder.targetType,
+    targetId: reminder.targetId,
+    quote: reminder.quote,
+  };
+  refreshReminders();
+  closeReminderComposer();
+  reminderIsSaving.value = false;
+  scheduleSavedReminder(reminder);
+}
+
+function cancelReminderFromList(reminder: RecordReminder) {
+  const canceledReminder = cancelReminder(reminder.id);
+
+  if (!canceledReminder) {
+    return;
+  }
+
+  reminderStatusMessage.value = '提醒已取消。';
+  refreshReminders();
+  void cancelReminderNotification(canceledReminder.notificationId);
+}
+
+function cancelTargetReminders(
+  targetType: ReminderTargetType,
+  targetId: string,
+) {
+  const canceledReminders = cancelRemindersForTarget(targetType, targetId);
+
+  refreshReminders();
+  void Promise.all(
+    canceledReminders.map((reminder) =>
+      cancelReminderNotification(reminder.notificationId),
+    ),
+  );
+}
+
+function focusReminderTarget(reminder: RecordReminder) {
+  refreshEntries();
+  refreshKnowledgeData();
+  refreshLabData();
+  highlightedReminderTarget.value = {
+    targetType: reminder.targetType,
+    targetId: reminder.targetId,
+    quote: reminder.quote,
+  };
+  reminderStatusMessage.value = reminder.quote
+    ? `已打开提醒位置：“${reminder.quote}”。`
+    : '已打开提醒对应的记录。';
+
+  if (reminder.targetType === 'journal-entry') {
+    activePark.value = 'journal';
+    activeView.value = 'timeline';
+    cancelEditing();
+    void scrollReminderTargetIntoView(reminder.targetType, reminder.targetId);
+    return;
+  }
+
+  if (reminder.targetType === 'knowledge-note') {
+    const note = knowledgeNotes.value.find((item) => item.id === reminder.targetId);
+
+    activePark.value = 'knowledge';
+    activeKnowledgeBaseId.value = note?.baseId ?? reminder.parentId;
+    selectedKnowledgeNoteId.value = reminder.targetId;
+    knowledgeInspectorMode.value = 'note-view';
+    knowledgeDrawerOpen.value = false;
+    void scrollReminderTargetIntoView(reminder.targetType, reminder.targetId);
+    return;
+  }
+
+  const record = labRecords.value.find((item) => item.id === reminder.targetId);
+
+  activePark.value = 'lab';
+  activeLabProjectId.value = record?.projectId ?? reminder.parentId;
+  selectedLabRecordId.value = reminder.targetId;
+  labInspectorMode.value = 'record-view';
+  labDrawerOpen.value = false;
+  void scrollReminderTargetIntoView(reminder.targetType, reminder.targetId);
+}
+
+async function scrollReminderTargetIntoView(
+  targetType: ReminderTargetType,
+  targetId: string,
+) {
+  await nextTick();
+
+  window.setTimeout(() => {
+    const targetElement = document.querySelector(
+      `[data-reminder-target="${targetType}:${targetId}"]`,
+    );
+
+    targetElement?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, 80);
+}
+
+function focusReminderById(reminderId: string) {
+  const reminder = getReminderById(reminderId);
+
+  if (!reminder || reminder.canceledAt !== null) {
+    reminderStatusMessage.value = '这条提醒已经不可用或已取消。';
+    refreshReminders();
+    return;
+  }
+
+  focusReminderTarget(reminder);
+}
+
+function isReminderHighlighted(
+  targetType: ReminderTargetType,
+  targetId: string,
+): boolean {
+  return (
+    highlightedReminderTarget.value?.targetType === targetType &&
+    highlightedReminderTarget.value.targetId === targetId
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function renderReminderHighlightedContent(
+  content: string,
+  targetType: ReminderTargetType,
+  targetId: string,
+): string {
+  const highlightedTarget = highlightedReminderTarget.value;
+
+  if (
+    !highlightedTarget ||
+    highlightedTarget.targetType !== targetType ||
+    highlightedTarget.targetId !== targetId ||
+    !highlightedTarget.quote
+  ) {
+    return escapeHtml(content);
+  }
+
+  const quoteIndex = content.indexOf(highlightedTarget.quote);
+
+  if (quoteIndex === -1) {
+    return escapeHtml(content);
+  }
+
+  const beforeQuote = content.slice(0, quoteIndex);
+  const highlightedQuote = content.slice(
+    quoteIndex,
+    quoteIndex + highlightedTarget.quote.length,
+  );
+  const afterQuote = content.slice(quoteIndex + highlightedTarget.quote.length);
+
+  return [
+    escapeHtml(beforeQuote),
+    '<mark class="reminder-target-highlight">',
+    escapeHtml(highlightedQuote),
+    '</mark>',
+    escapeHtml(afterQuote),
+  ].join('');
 }
 
 function parseTagInput(rawTags: string): string[] {
@@ -568,6 +1025,11 @@ function removeKnowledgeBase(base: KnowledgeBase) {
     return;
   }
 
+  void Promise.all(
+    knowledgeNotes.value
+      .filter((note) => note.baseId === base.id)
+      .map((note) => cancelTargetReminders('knowledge-note', note.id)),
+  );
   deleteKnowledgeBase(base.id);
   selectedKnowledgeNoteId.value = null;
   knowledgeInspectorMode.value = 'base';
@@ -663,6 +1125,7 @@ function removeKnowledgeNote(note: KnowledgeNote) {
   }
 
   deleteKnowledgeNote(note.id);
+  void cancelTargetReminders('knowledge-note', note.id);
 
   if (
     editingKnowledgeNoteId.value === note.id ||
@@ -842,6 +1305,11 @@ function removeLabProject(project: LabProject) {
     return;
   }
 
+  void Promise.all(
+    labRecords.value
+      .filter((record) => record.projectId === project.id)
+      .map((record) => cancelTargetReminders('lab-record', record.id)),
+  );
   deleteLabProject(project.id);
   selectedLabRecordId.value = null;
   labInspectorMode.value = 'project';
@@ -937,6 +1405,7 @@ function removeLabRecord(record: LabRecord) {
   }
 
   deleteLabRecord(record.id);
+  void cancelTargetReminders('lab-record', record.id);
 
   if (
     editingLabRecordId.value === record.id ||
@@ -1038,6 +1507,7 @@ function removeEntry(entry: JournalEntry) {
   }
 
   deleteEntry(entry.id);
+  void cancelTargetReminders('journal-entry', entry.id);
 
   if (editingId.value === entry.id) {
     cancelEditing();
@@ -1204,6 +1674,12 @@ async function submitAgentMessage() {
     ragIndexVersion.value += 1;
   }
 }
+
+onMounted(() => {
+  void listenForReminderNotificationActions((action) => {
+    focusReminderById(action.reminderId);
+  });
+});
 </script>
 
 <template>
@@ -1287,6 +1763,46 @@ async function submitAgentMessage() {
     </section>
 
     <section
+      v-if="activeReminders.length > 0 || reminderStatusMessage"
+      class="reminder-dock"
+      aria-label="系统提醒"
+    >
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">提醒</p>
+          <h2>系统定时提醒</h2>
+        </div>
+        <span class="counter">{{ activeReminders.length }} 条</span>
+      </div>
+
+      <p v-if="reminderStatusMessage" class="reminder-message">
+        {{ reminderStatusMessage }}
+      </p>
+
+      <div v-if="visibleReminders.length > 0" class="reminder-list">
+        <article
+          v-for="reminder in visibleReminders"
+          :key="reminder.id"
+          class="reminder-item"
+        >
+          <button type="button" class="reminder-item-main" @click="focusReminderTarget(reminder)">
+            <span>{{ getTargetTypeLabel(reminder.targetType) }} · {{ formatReminderDateTime(reminder.scheduledAt) }}</span>
+            <strong>{{ reminder.reminderTitle }}</strong>
+            <small>{{ reminder.quote || reminder.targetTitle }}</small>
+          </button>
+          <div class="reminder-item-actions">
+            <button class="ghost-action" type="button" @click="startReminderEditing(reminder)">
+              修改
+            </button>
+            <button class="delete-action" type="button" @click="cancelReminderFromList(reminder)">
+              取消
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section
       v-if="activePark === 'journal'"
       class="park-workspace journal-workspace"
       aria-label="日记区"
@@ -1366,7 +1882,13 @@ async function submitAgentMessage() {
       </div>
 
       <div v-else class="entry-groups search-results">
-        <article v-for="entry in searchResults" :key="entry.id" class="entry-card">
+        <article
+          v-for="entry in searchResults"
+          :key="entry.id"
+          class="entry-card"
+          :data-reminder-target="`journal-entry:${entry.id}`"
+          :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
+        >
           <template v-if="editingId === entry.id">
             <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
             <div class="entry-actions">
@@ -1388,14 +1910,19 @@ async function submitAgentMessage() {
                 {{ getDateGroupLabel(entry.createdAt) }} · {{ formatEntryTime(entry.createdAt) }}
               </span>
               <strong>{{ entry.title }}</strong>
-              <p>{{ entry.content }}</p>
+              <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
             </button>
 
             <div class="entry-footer">
               <span>{{ entry.content.length }} 字</span>
-              <button class="delete-action" type="button" @click="removeEntry(entry)">
-                删除
-              </button>
+              <div class="entry-footer-actions">
+                <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
+                  提醒
+                </button>
+                <button class="delete-action" type="button" @click="removeEntry(entry)">
+                  删除
+                </button>
+              </div>
             </div>
           </template>
         </article>
@@ -1466,7 +1993,13 @@ async function submitAgentMessage() {
         </div>
 
         <div v-else class="entry-groups">
-          <article v-for="entry in selectedDateEntries" :key="entry.id" class="entry-card">
+          <article
+            v-for="entry in selectedDateEntries"
+            :key="entry.id"
+            class="entry-card"
+            :data-reminder-target="`journal-entry:${entry.id}`"
+            :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
+          >
             <template v-if="editingId === entry.id">
               <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
               <div class="entry-actions">
@@ -1486,14 +2019,19 @@ async function submitAgentMessage() {
               <button class="entry-body" type="button" @click="startEditing(entry)">
                 <span class="entry-time">{{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
-                <p>{{ entry.content }}</p>
+                <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
               </button>
 
               <div class="entry-footer">
                 <span>{{ entry.content.length }} 字</span>
-                <button class="delete-action" type="button" @click="removeEntry(entry)">
-                  删除
-                </button>
+                <div class="entry-footer-actions">
+                  <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
+                    提醒
+                  </button>
+                  <button class="delete-action" type="button" @click="removeEntry(entry)">
+                    删除
+                  </button>
+                </div>
               </div>
             </template>
           </article>
@@ -1513,7 +2051,13 @@ async function submitAgentMessage() {
         <section v-for="group in groupedEntries" :key="group.label" class="entry-group">
           <h3>{{ group.label }}</h3>
 
-          <article v-for="entry in group.entries" :key="entry.id" class="entry-card">
+          <article
+            v-for="entry in group.entries"
+            :key="entry.id"
+            class="entry-card"
+            :data-reminder-target="`journal-entry:${entry.id}`"
+            :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
+          >
             <template v-if="editingId === entry.id">
               <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
               <div class="entry-actions">
@@ -1533,14 +2077,19 @@ async function submitAgentMessage() {
               <button class="entry-body" type="button" @click="startEditing(entry)">
                 <span class="entry-time">{{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
-                <p>{{ entry.content }}</p>
+                <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
               </button>
 
               <div class="entry-footer">
                 <span>{{ entry.content.length }} 字</span>
-                <button class="delete-action" type="button" @click="removeEntry(entry)">
-                  删除
-                </button>
+                <div class="entry-footer-actions">
+                  <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
+                    提醒
+                  </button>
+                  <button class="delete-action" type="button" @click="removeEntry(entry)">
+                    删除
+                  </button>
+                </div>
               </div>
             </template>
           </article>
@@ -1851,7 +2400,12 @@ async function submitAgentMessage() {
               <span v-for="tag in selectedKnowledgeNote.tags" :key="tag">{{ tag }}</span>
             </div>
 
-            <p class="knowledge-note-content">{{ selectedKnowledgeNote.content }}</p>
+            <p
+              class="knowledge-note-content"
+              :data-reminder-target="`knowledge-note:${selectedKnowledgeNote.id}`"
+              :class="{ 'has-reminder-target': isReminderHighlighted('knowledge-note', selectedKnowledgeNote.id) }"
+              v-html="renderReminderHighlightedContent(selectedKnowledgeNote.content, 'knowledge-note', selectedKnowledgeNote.id)"
+            ></p>
 
             <a
               v-if="selectedKnowledgeNote.sourceUrl"
@@ -1867,13 +2421,18 @@ async function submitAgentMessage() {
               <button class="delete-action" type="button" @click="removeKnowledgeNote(selectedKnowledgeNote)">
                 删除
               </button>
-              <button
-                class="primary-action small"
-                type="button"
-                @click="startKnowledgeNoteEditing(selectedKnowledgeNote)"
-              >
-                编辑
-              </button>
+              <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="openKnowledgeReminderComposer(selectedKnowledgeNote)">
+                  提醒
+                </button>
+                <button
+                  class="primary-action small"
+                  type="button"
+                  @click="startKnowledgeNoteEditing(selectedKnowledgeNote)"
+                >
+                  编辑
+                </button>
+              </div>
             </div>
           </template>
 
@@ -2269,19 +2828,29 @@ async function submitAgentMessage() {
               <span v-for="tag in selectedLabRecord.tags" :key="tag">{{ tag }}</span>
             </div>
 
-            <p class="knowledge-note-content">{{ selectedLabRecord.content }}</p>
+            <p
+              class="knowledge-note-content"
+              :data-reminder-target="`lab-record:${selectedLabRecord.id}`"
+              :class="{ 'has-reminder-target': isReminderHighlighted('lab-record', selectedLabRecord.id) }"
+              v-html="renderReminderHighlightedContent(selectedLabRecord.content, 'lab-record', selectedLabRecord.id)"
+            ></p>
 
             <div class="entry-actions knowledge-detail-actions">
               <button class="delete-action" type="button" @click="removeLabRecord(selectedLabRecord)">
                 删除
               </button>
-              <button
-                class="primary-action small"
-                type="button"
-                @click="startLabRecordEditing(selectedLabRecord)"
-              >
-                编辑
-              </button>
+              <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="openLabReminderComposer(selectedLabRecord)">
+                  提醒
+                </button>
+                <button
+                  class="primary-action small"
+                  type="button"
+                  @click="startLabRecordEditing(selectedLabRecord)"
+                >
+                  编辑
+                </button>
+              </div>
             </div>
           </template>
 
@@ -2415,6 +2984,76 @@ async function submitAgentMessage() {
         </div>
       </div>
     </section>
+
+    <div
+      v-if="reminderComposerOpen && reminderTarget"
+      class="reminder-modal-backdrop"
+      role="presentation"
+    >
+      <section
+        class="reminder-modal"
+        aria-labelledby="reminder-modal-title"
+        aria-modal="true"
+        role="dialog"
+      >
+        <header class="reminder-modal-header">
+          <div>
+            <p class="eyebrow">
+              {{ reminderEditingId ? '修改提醒' : '新增提醒' }}
+            </p>
+            <h2 id="reminder-modal-title">系统定时提醒</h2>
+          </div>
+          <button class="panel-close" type="button" @click="closeReminderComposer">
+            关闭
+          </button>
+        </header>
+
+        <div class="reminder-target-card">
+          <span>{{ getTargetTypeLabel(reminderTarget.type) }}</span>
+          <strong>{{ reminderTarget.title }}</strong>
+          <small>选中正文里的某句话后点“提醒”，会自动带入这里。</small>
+        </div>
+
+        <label class="reminder-field">
+          <span>提醒标题</span>
+          <input v-model="reminderTitle" type="text" maxlength="80" />
+        </label>
+
+        <label class="reminder-field">
+          <span>提醒时间</span>
+          <input
+            v-model="reminderScheduledAt"
+            type="datetime-local"
+            :min="reminderMinDateTime"
+          />
+        </label>
+
+        <label class="reminder-field">
+          <span>定位到这句话，可选</span>
+          <textarea
+            v-model="reminderQuote"
+            rows="3"
+            placeholder="可以填入记录中的一句话；通知点击后会尝试高亮定位。"
+          ></textarea>
+        </label>
+
+        <p v-if="reminderError" class="reminder-error">{{ reminderError }}</p>
+
+        <div class="reminder-modal-actions">
+          <button class="ghost-action" type="button" @click="closeReminderComposer">
+            取消
+          </button>
+          <button
+            class="primary-action small"
+            type="button"
+            :disabled="!canSaveReminder"
+            @click="saveReminder"
+          >
+            {{ reminderIsSaving ? '保存中...' : '保存提醒' }}
+          </button>
+        </div>
+      </section>
+    </div>
 
     <div class="agent-layer">
       <button

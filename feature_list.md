@@ -165,6 +165,7 @@ Codex 会优先读取这些任务卡：
 | `TASK-020` | `done` | 做记 Park 项目记录：按项目聚合操作与复盘，并用颜色类型标记区分记录 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-025` | `planned` | 做记仓库目标卡片：为每个仓库新增目标卡片来存放目标清单，并在完成时提供可交互动效 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-026` | `planned` | 笔记与做记多分支层级：知识库和做记项目内部支持最多 4 层分支树，用于组织主题、章节、模块或阶段 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-027` | `done` | 系统提醒与句子级定时提醒：为某条记录或记录中的某句话设置系统定时提醒，点击后回到对应位置 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-021` | `planned` | 多类型资料检索与 Agent 读取：让搜索和 Agent 能理解日志、知识库、实验、项目等不同记录来源 | `cd journal-agent && npm run build && npm run test:agent-api` |
 | `TASK-023` | `planned` | 共同 Workspace 与权限控制：支持邀请他人加入共享 workspace，并只允许有权限的成员操作其中内容 | `cd journal-agent && npm run build` |
 | `TASK-024` | `done` | Agent 三记写入工具：允许 Agent 在受限协议下新增或编辑心记、笔记和做记记录，但不提供删除能力 | `cd journal-agent && npm run build && npm run test:agent-api` |
@@ -517,7 +518,7 @@ Codex 会优先读取这些任务卡：
 
 ### F006：本地数据导出
 
-状态：`planned`
+状态：`done`
 
 允许用户把日志导出为 JSON 和 Markdown，方便备份。
 
@@ -594,6 +595,28 @@ Codex 会优先读取这些任务卡：
 - 分支支持新增、重命名、移动、归档或删除前确认；删除分支时不能静默删除已有记录。
 - 移动端使用折叠树或二级抽屉管理分支，避免常驻挤占主内容区。
 - Agent 新增或编辑笔记、做记时可以读取分支上下文；目标分支不明确时先追问，不要猜。
+
+### F031：系统提醒与句子级定时提醒
+
+状态：`planned`
+
+与系统提醒能力挂钩，让用户可以对某条心记、知识笔记或做记记录设置定时提醒；更细时，可以选中记录里的某句话设置提醒，像微信定时提醒一样在指定时间收到系统通知。点击通知后回到 App，并打开对应记录、定位到目标句子。
+
+验收标准：
+
+- 用户可以为心记、知识笔记和做记记录设置一次性定时提醒。
+- 用户可以选中记录中的某句话或一段文本，并基于该文本创建提醒。
+- 提醒数据保存记录类型、记录 id、提醒时间、提醒标题、句子摘录和句子锚点。
+- 到达提醒时间时，系统通知能展示记录标题和目标句子的简短摘录。
+- 点击通知后，App 打开对应 Park、对应记录，并尽量滚动和高亮到目标句子。
+- 如果原记录内容被编辑导致句子锚点失效，App 能退回到打开对应记录，并提示原句可能已变化。
+- 用户可以查看、修改、取消已有提醒；取消提醒必须同步取消系统通知。
+- 首次使用前请求系统通知权限；用户拒绝权限时提供清晰提示，不阻塞普通记录功能。
+
+验证结果：
+
+- `npm run build` 通过。
+- `npx cap sync ios` 通过，并识别到 `@capacitor/local-notifications@8.0.2`。
 
 ### F025：多类型资料检索与 Agent 读取
 
