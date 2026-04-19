@@ -105,12 +105,55 @@
   },
   "implementationQueue": [
     {
+      "id": "TASK-009",
+      "featureId": "F013",
+      "category": "feature",
+      "description": "iOS 手记风格视觉重构：整体界面改为简洁、高级、接近 Apple Journal 气质的原生 iOS 风格",
+      "status": "done",
+      "priority": 4,
+      "dependsOn": [
+        "F003"
+      ],
+      "steps": [
+        "使用 iOS 系统字体栈，优先匹配 San Francisco / 苹方的观感",
+        "把页面背景、卡片、按钮、分段控制器改成轻量、留白充足、磨砂玻璃感的 iOS 风格",
+        "保留现有时间线、搜索、日历、编辑和删除能力",
+        "避免直接复制 Apple 专有图标、插画或逐像素界面，只借鉴原生交互气质",
+        "移动端布局需要适配 iPhone 竖屏"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "已完成。字体使用 -apple-system / SF Pro / PingFang SC 栈；视觉目标是 Apple Journal inspired，而不是复制专有资产。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "TASK-010",
+      "featureId": "F014",
+      "category": "feature",
+      "description": "Agent 浮窗聊天入口：使用占位 API 配置，并在边缘显示小动漫头像，点击后打开浮窗聊天界面",
+      "status": "done",
+      "priority": 5,
+      "dependsOn": [
+        "F002"
+      ],
+      "steps": [
+        "新增占位的大模型 API URL、API Key 和 model 配置",
+        "在页面边缘显示一个小动漫头像按钮",
+        "点击头像后打开浮窗聊天面板",
+        "聊天面板支持展示消息、输入消息和发送消息",
+        "占位配置下先返回本地模拟回复，避免真实请求失败影响体验",
+        "代码中明确标注真实 API Key 不应放在客户端，后续应改为后端代理"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "已完成。第一版只做交互壳和 API client 形状，不接入真实密钥；占位配置下返回本地模拟回复。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
       "id": "TASK-005",
       "featureId": "F005",
       "category": "feature",
       "description": "草稿自动保存：未提交的日志内容在刷新、关闭或切后台后可以恢复",
       "status": "ready",
-      "priority": 5,
+      "priority": 6,
       "dependsOn": [
         "F002"
       ],
@@ -131,7 +174,7 @@
       "category": "feature",
       "description": "本地数据导出：把日志导出为 JSON 和 Markdown，便于备份",
       "status": "planned",
-      "priority": 6,
+      "priority": 7,
       "dependsOn": [
         "F002"
       ],
@@ -152,7 +195,7 @@
       "category": "feature",
       "description": "心情与标签：日志支持 mood 和 tags，并在列表、搜索、日历中展示",
       "status": "planned",
-      "priority": 7,
+      "priority": 8,
       "dependsOn": [
         "F002",
         "F003"
@@ -174,7 +217,7 @@
       "category": "feature",
       "description": "搜索体验优化：高亮关键词、清空查询、显示命中片段",
       "status": "planned",
-      "priority": 8,
+      "priority": 9,
       "dependsOn": [
         "F003"
       ],
@@ -280,10 +323,57 @@
       "notes": "已创建 backlog 文件，并把生成的 Xcode build 产物从 Git 跟踪中移除。"
     },
     {
+      "id": "F013",
+      "title": "iOS 手记风格视觉重构",
+      "status": "done",
+      "priority": 4,
+      "phase": "M2-local-journal",
+      "summary": "把当前日志 App 重构为简洁、高级、接近 Apple Journal 气质的原生 iOS 风格。",
+      "dependsOn": [
+        "F003"
+      ],
+      "acceptanceCriteria": [
+        "整体字体使用 iOS 系统字体栈，优先呈现 San Francisco / 苹方观感。",
+        "页面使用大留白、轻背景、白色卡片、柔和阴影和分段控制器。",
+        "时间线、搜索、日历、编辑和删除能力保持可用。",
+        "不直接复制 Apple 专有素材或逐像素界面。",
+        "iPhone 竖屏下布局稳定、按钮易点。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。实现 Apple Journal inspired 的体验气质，不使用 Apple 专有图标、插画或截图。"
+    },
+    {
+      "id": "F014",
+      "title": "Agent 浮窗聊天入口",
+      "status": "done",
+      "priority": 5,
+      "phase": "M2-local-journal",
+      "summary": "在页面边缘放置小动漫头像，点击后打开与日志 Agent 对话的浮窗聊天界面。",
+      "dependsOn": [
+        "F002"
+      ],
+      "acceptanceCriteria": [
+        "存在占位 API URL、API Key 和 model 配置。",
+        "页面边缘显示小动漫头像入口。",
+        "点击头像后出现浮窗聊天界面。",
+        "用户可以输入消息并看到对话记录。",
+        "占位配置下返回本地模拟回复，不阻塞界面。",
+        "代码说明真实 API Key 后续应通过后端代理使用。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。第一版建立了交互和服务边界，不在客户端放真实密钥；占位配置下使用模拟回复。"
+    },
+    {
       "id": "F005",
       "title": "草稿自动保存",
       "status": "ready",
-      "priority": 4,
+      "priority": 6,
       "phase": "M2-local-journal",
       "summary": "当 App 关闭、刷新或进入后台时，保留尚未提交的日志草稿。",
       "dependsOn": [
@@ -305,7 +395,7 @@
       "id": "F006",
       "title": "本地数据导出",
       "status": "planned",
-      "priority": 5,
+      "priority": 7,
       "phase": "M3-data-safety",
       "summary": "允许用户把日志导出为 JSON 和 Markdown，方便备份。",
       "dependsOn": [
@@ -326,7 +416,7 @@
       "id": "F007",
       "title": "心情与标签",
       "status": "planned",
-      "priority": 6,
+      "priority": 8,
       "phase": "M3-organization",
       "summary": "为日志增加轻量心情和标签元数据。",
       "dependsOn": [
@@ -349,7 +439,7 @@
       "id": "F008",
       "title": "搜索体验优化",
       "status": "planned",
-      "priority": 7,
+      "priority": 9,
       "phase": "M3-organization",
       "summary": "增加搜索命中高亮、清空按钮和结果摘要片段。",
       "dependsOn": [
@@ -370,7 +460,7 @@
       "id": "F009",
       "title": "IndexedDB 存储适配器",
       "status": "planned",
-      "priority": 8,
+      "priority": 10,
       "phase": "M4-storage",
       "summary": "从 localStorage 迁移到更适合大量日志的异步 IndexedDB 存储适配器。",
       "dependsOn": [
@@ -393,7 +483,7 @@
       "id": "F010",
       "title": "iCloud 同步方案调研",
       "status": "planned",
-      "priority": 9,
+      "priority": 11,
       "phase": "M5-sync",
       "summary": "在实现前研究并设计 CloudKit/iCloud 同步架构。",
       "dependsOn": [
@@ -415,7 +505,7 @@
       "id": "F011",
       "title": "隐私锁",
       "status": "planned",
-      "priority": 10,
+      "priority": 12,
       "phase": "M6-privacy",
       "summary": "用 Face ID / 密码式本地认证保护 App 内容。",
       "dependsOn": [
@@ -438,7 +528,7 @@
       "id": "F012",
       "title": "TestFlight 分发",
       "status": "planned",
-      "priority": 11,
+      "priority": 13,
       "phase": "M7-distribution",
       "summary": "从免费账号本地安装，升级到 TestFlight 内测分发。",
       "dependsOn": [

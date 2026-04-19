@@ -3,6 +3,12 @@ import { computed, ref } from 'vue';
 import type { CalendarDay } from './utils/date';
 import type { JournalEntry } from './types/journal';
 import {
+  AGENT_API_CONFIG,
+  createAgentMessage,
+  sendAgentMessage,
+  type AgentChatMessage,
+} from './services/agentClient';
+import {
   createEntry,
   deleteEntry,
   getEntries,
@@ -32,6 +38,15 @@ const editingContent = ref('');
 const searchQuery = ref('');
 const calendarMonth = ref(startOfMonth(new Date()));
 const selectedDateKey = ref(getLocalDateKey(new Date()));
+const agentPanelOpen = ref(false);
+const agentInput = ref('');
+const agentIsThinking = ref(false);
+const agentMessages = ref<AgentChatMessage[]>([
+  createAgentMessage(
+    'assistant',
+    '你好，我是心记 Agent。现在我还在使用占位模型，但已经可以先陪你整理想法、生成日志提示，之后会接入真实 API。',
+  ),
+]);
 
 const groupedEntries = computed(() => groupEntriesByDate(entries.value));
 
@@ -54,6 +69,10 @@ const todayCount = computed(() => {
 
 const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(() => draftCharacterCount.value > 0);
+const agentModelLabel = computed(() => AGENT_API_CONFIG.model);
+const canSendAgentMessage = computed(
+  () => agentInput.value.trim().length > 0 && !agentIsThinking.value,
+);
 
 const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLocaleLowerCase());
 
@@ -192,20 +211,67 @@ function jumpToToday() {
   calendarMonth.value = startOfMonth(today);
   selectedDateKey.value = getLocalDateKey(today);
 }
+
+function toggleAgentPanel() {
+  agentPanelOpen.value = !agentPanelOpen.value;
+}
+
+function closeAgentPanel() {
+  agentPanelOpen.value = false;
+}
+
+async function submitAgentMessage() {
+  const content = agentInput.value.trim();
+
+  if (!content || agentIsThinking.value) {
+    return;
+  }
+
+  const userMessage = createAgentMessage('user', content);
+  agentMessages.value = [...agentMessages.value, userMessage];
+  agentInput.value = '';
+  agentIsThinking.value = true;
+
+  try {
+    const assistantMessage = await sendAgentMessage({
+      messages: agentMessages.value,
+      entries: entries.value,
+    });
+    agentMessages.value = [...agentMessages.value, assistantMessage];
+  } catch {
+    agentMessages.value = [
+      ...agentMessages.value,
+      createAgentMessage(
+        'assistant',
+        '我刚刚没有连上模型服务。现在先检查占位 URL / API Key / model，之后我们会把真实请求接到后端代理。',
+      ),
+    ];
+  } finally {
+    agentIsThinking.value = false;
+  }
+}
 </script>
 
 <template>
   <main class="journal-app">
     <section class="hero-panel" aria-labelledby="app-title">
       <div>
-        <p class="eyebrow">Local Journal</p>
+        <p class="eyebrow">今日</p>
         <h1 id="app-title">心记</h1>
         <p class="today-line">{{ formatTodayHeader() }}</p>
       </div>
 
-      <div class="today-pill">
-        <span>{{ todayCount }}</span>
-        <small>今日记录</small>
+      <div class="header-actions" aria-label="快捷操作">
+        <button class="icon-button" type="button" @click="setActiveView('search')">
+          搜索
+        </button>
+        <button class="icon-button" type="button" @click="setActiveView('calendar')">
+          日历
+        </button>
+        <div class="today-pill">
+          <span>{{ todayCount }}</span>
+          <small>今日</small>
+        </div>
       </div>
     </section>
 
@@ -236,10 +302,15 @@ function jumpToToday() {
     <section v-if="activeView === 'timeline'" class="compose-card" aria-labelledby="compose-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Quick Capture</p>
+          <p class="eyebrow">新的记录</p>
           <h2 id="compose-title">今天想记点什么？</h2>
         </div>
         <span class="counter">{{ draftCharacterCount }} 字</span>
+      </div>
+
+      <div class="prompt-card">
+        <span>写作提示</span>
+        <p>把今天最值得保存的一个瞬间写下来，不需要完整，只要真实。</p>
       </div>
 
       <textarea
@@ -257,7 +328,7 @@ function jumpToToday() {
     <section v-if="activeView === 'search'" class="tool-card" aria-labelledby="search-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Search</p>
+          <p class="eyebrow">查找</p>
           <h2 id="search-title">搜索日志</h2>
         </div>
         <span class="counter">{{ searchResults.length }} 条</span>
@@ -320,7 +391,7 @@ function jumpToToday() {
     <section v-if="activeView === 'calendar'" class="tool-card" aria-labelledby="calendar-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Calendar</p>
+          <p class="eyebrow">日历</p>
           <h2 id="calendar-title">{{ currentMonthTitle }}</h2>
         </div>
         <button class="ghost-action" type="button" @click="jumpToToday">回到今天</button>
@@ -369,7 +440,7 @@ function jumpToToday() {
       <div class="selected-day-panel">
         <div class="section-heading compact">
           <div>
-            <p class="eyebrow">Selected Day</p>
+            <p class="eyebrow">选中日期</p>
             <h2>{{ selectedDateLabel }}</h2>
           </div>
           <span class="counter">{{ selectedDateEntries.length }} 条</span>
@@ -419,7 +490,7 @@ function jumpToToday() {
     <section v-if="activeView === 'timeline'" class="timeline" aria-labelledby="timeline-title">
       <div class="section-heading compact">
         <div>
-          <p class="eyebrow">Timeline</p>
+          <p class="eyebrow">回顾</p>
           <h2 id="timeline-title">日志时间线</h2>
         </div>
         <span class="counter">{{ entries.length }} 条</span>
@@ -468,5 +539,78 @@ function jumpToToday() {
         </section>
       </div>
     </section>
+
+    <div class="agent-layer">
+      <button
+        class="agent-fab"
+        type="button"
+        :aria-expanded="agentPanelOpen"
+        aria-controls="agent-panel"
+        @click="toggleAgentPanel"
+      >
+        <span class="anime-avatar" aria-hidden="true">
+          <span class="avatar-hair"></span>
+          <span class="avatar-face">
+            <i></i>
+            <i></i>
+            <b></b>
+          </span>
+        </span>
+        <span class="agent-fab-copy">Agent</span>
+      </button>
+
+      <section
+        v-if="agentPanelOpen"
+        id="agent-panel"
+        class="agent-panel"
+        aria-labelledby="agent-title"
+      >
+        <header class="agent-panel-header">
+          <span class="anime-avatar compact" aria-hidden="true">
+            <span class="avatar-hair"></span>
+            <span class="avatar-face">
+              <i></i>
+              <i></i>
+              <b></b>
+            </span>
+          </span>
+          <div>
+            <p class="eyebrow">占位模型</p>
+            <h2 id="agent-title">心记 Agent</h2>
+            <span>{{ agentModelLabel }}</span>
+          </div>
+          <button class="panel-close" type="button" aria-label="关闭 Agent 浮窗" @click="closeAgentPanel">
+            关闭
+          </button>
+        </header>
+
+        <div class="agent-messages" aria-live="polite">
+          <article
+            v-for="message in agentMessages"
+            :key="message.id"
+            class="agent-message"
+            :class="message.role"
+          >
+            <span>{{ message.role === 'user' ? '你' : 'Agent' }}</span>
+            <p>{{ message.content }}</p>
+          </article>
+
+          <article v-if="agentIsThinking" class="agent-message assistant">
+            <span>Agent</span>
+            <p>正在整理你的想法...</p>
+          </article>
+        </div>
+
+        <form class="agent-composer" @submit.prevent="submitAgentMessage">
+          <input
+            v-model="agentInput"
+            type="text"
+            placeholder="问问今天该怎么记录..."
+            aria-label="输入给 Agent 的消息"
+          />
+          <button type="submit" :disabled="!canSendAgentMessage">发送</button>
+        </form>
+      </section>
+    </div>
   </main>
 </template>
