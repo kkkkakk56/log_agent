@@ -285,6 +285,28 @@
       "notes": "已完成。标题最大 18 字，保持和现有标题生成长度一致。"
     },
     {
+      "id": "TASK-016",
+      "featureId": "F020",
+      "category": "feature",
+      "description": "手记主屏风格对齐：参考用户截图，重构为大标题统计行、白色日志卡和底部加号写作入口",
+      "status": "done",
+      "priority": 4,
+      "dependsOn": [
+        "F013",
+        "F019"
+      ],
+      "steps": [
+        "主屏顶部使用大标题、右侧圆形搜索/更多按钮和三段统计信息",
+        "移除顶部写作卡片和分段视图切换，让时间线直接展示日期分组日志卡",
+        "日志卡片使用白色大圆角、正文大字号、底部日期和更多按钮，贴近截图观感",
+        "新增底部居中的加号写作入口，点击后打开写作面板",
+        "保留 Agent 小动漫头像入口，不把它改成系统样式"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。尽量对齐截图中的 Apple 手记风格，但不复制 Apple 专有素材；搜索和日历仍通过顶部圆形按钮进入。"
+    },
+    {
       "id": "TASK-006",
       "featureId": "F006",
       "category": "feature",
@@ -634,6 +656,30 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。标题最大 18 字，保持和现有标题生成长度一致。"
+    },
+    {
+      "id": "F020",
+      "title": "手记主屏风格对齐",
+      "status": "done",
+      "priority": 4,
+      "phase": "M2-local-journal",
+      "summary": "参考用户提供的手记截图，把主屏对齐为大标题、统计行、白色日志卡片和底部加号写作入口，同时保留 Agent 小头像。",
+      "dependsOn": [
+        "F013",
+        "F019"
+      ],
+      "acceptanceCriteria": [
+        "主屏顶部展示大标题、搜索按钮、更多/日历按钮和三段统计。",
+        "时间线不再显示顶部写作卡或分段切换，直接展示日期分组。",
+        "日志卡片使用接近截图的白色大圆角、大字号正文和底部日期栏。",
+        "底部居中有加号按钮，点击后打开写作面板。",
+        "Agent 小动漫头像入口继续保留在页面边缘。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。视觉上贴近用户截图，但不复刻 Apple 专有素材。"
     },
     {
       "id": "F006",

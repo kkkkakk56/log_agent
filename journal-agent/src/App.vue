@@ -32,7 +32,6 @@ import {
   formatDateLabel,
   formatEntryTime,
   formatMonthTitle,
-  formatTodayHeader,
   getDateGroupLabel,
   getLocalDateKey,
   groupEntriesByDate,
@@ -58,6 +57,7 @@ if (initialAgentConversations.length === 0) {
 
 const entries = ref<JournalEntry[]>(getEntries());
 const activeView = ref<ActiveView>('timeline');
+const composerOpen = ref(false);
 const draftTitle = ref('');
 const draftContent = ref('');
 const editingId = ref<string | null>(null);
@@ -87,12 +87,32 @@ const entryCountByDate = computed(() => {
   return counts;
 });
 
-const todayCount = computed(() => {
-  const today = getLocalDateKey(new Date());
+const totalCharacterCount = computed(() =>
+  entries.value.reduce((total, entry) => total + entry.content.length, 0),
+);
+const writingDayCount = computed(() => entryCountByDate.value.size);
+const streakDayCount = computed(() => {
+  const recordedDays = new Set(entryCountByDate.value.keys());
 
-  return entryCountByDate.value.get(today) ?? 0;
+  if (recordedDays.size === 0) {
+    return 0;
+  }
+
+  const cursor = new Date();
+
+  if (!recordedDays.has(getLocalDateKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  let streak = 0;
+
+  while (recordedDays.has(getLocalDateKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  return streak;
 });
-
 const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(() => draftCharacterCount.value > 0);
 const agentModeLabel = computed(() => getAgentModeLabel());
@@ -173,6 +193,7 @@ function refreshAgentConversations() {
 
 function setActiveView(view: ActiveView) {
   activeView.value = view;
+  composerOpen.value = false;
   cancelEditing();
 }
 
@@ -185,7 +206,18 @@ function saveDraft() {
 
   draftTitle.value = '';
   draftContent.value = '';
+  composerOpen.value = false;
   refreshEntries();
+}
+
+function openComposer() {
+  activeView.value = 'timeline';
+  cancelEditing();
+  composerOpen.value = true;
+}
+
+function closeComposer() {
+  composerOpen.value = false;
 }
 
 function startEditing(entry: JournalEntry) {
@@ -347,87 +379,43 @@ async function submitAgentMessage() {
 <template>
   <main class="journal-app">
     <section class="hero-panel" aria-labelledby="app-title">
-      <div>
-        <p class="eyebrow">今日</p>
+      <div class="hero-title-row">
         <h1 id="app-title">心记</h1>
-        <p class="today-line">{{ formatTodayHeader() }}</p>
+        <div class="header-actions" aria-label="快捷操作">
+          <button class="circle-action" type="button" aria-label="搜索日志" @click="setActiveView('search')">
+            <span class="search-glyph" aria-hidden="true"></span>
+          </button>
+          <button class="circle-action" type="button" aria-label="打开日历" @click="setActiveView('calendar')">
+            <span aria-hidden="true">•••</span>
+          </button>
+        </div>
       </div>
 
-      <div class="header-actions" aria-label="快捷操作">
-        <button class="icon-button" type="button" @click="setActiveView('search')">
-          搜索
-        </button>
-        <button class="icon-button" type="button" @click="setActiveView('calendar')">
-          日历
-        </button>
-        <div class="today-pill">
-          <span>{{ todayCount }}</span>
-          <small>今日</small>
+      <div class="stats-row" aria-label="日志统计">
+        <div class="stat-item">
+          <strong><span class="stat-icon flame">●</span>{{ streakDayCount }}</strong>
+          <span>连续记录天数</span>
+        </div>
+        <div class="stat-item">
+          <strong><span class="stat-icon quote">“</span>{{ totalCharacterCount.toLocaleString() }}</strong>
+          <span>字数</span>
+        </div>
+        <div class="stat-item">
+          <strong><span class="stat-icon calendar">▦</span>{{ writingDayCount }}</strong>
+          <span>写手记天数</span>
         </div>
       </div>
     </section>
 
-    <nav class="view-switcher" aria-label="日志视图">
-      <button
-        type="button"
-        :class="{ active: activeView === 'timeline' }"
-        @click="setActiveView('timeline')"
-      >
-        时间线
-      </button>
-      <button
-        type="button"
-        :class="{ active: activeView === 'search' }"
-        @click="setActiveView('search')"
-      >
-        搜索
-      </button>
-      <button
-        type="button"
-        :class="{ active: activeView === 'calendar' }"
-        @click="setActiveView('calendar')"
-      >
-        日历
-      </button>
-    </nav>
-
-    <section v-if="activeView === 'timeline'" class="compose-card" aria-labelledby="compose-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">新的记录</p>
-          <h2 id="compose-title">今天想记点什么？</h2>
-        </div>
-        <span class="counter">{{ draftCharacterCount }} 字</span>
-      </div>
-
-      <input
-        v-model="draftTitle"
-        class="title-input"
-        type="text"
-        maxlength="18"
-        placeholder="标题，可选"
-        aria-label="日志标题"
-      />
-
-      <textarea
-        v-model="draftContent"
-        class="journal-input"
-        placeholder="写下刚刚发生的事、一个念头，或者一句想留住的话。"
-        rows="6"
-      />
-
-      <button class="primary-action" type="button" :disabled="!canSaveDraft" @click="saveDraft">
-        保存这一刻
-      </button>
-    </section>
-
-    <section v-if="activeView === 'search'" class="tool-card" aria-labelledby="search-title">
+    <section v-if="activeView === 'search'" class="tool-card view-panel" aria-labelledby="search-title">
       <div class="section-heading">
         <div>
           <p class="eyebrow">查找</p>
           <h2 id="search-title">搜索日志</h2>
         </div>
-        <span class="counter">{{ searchResults.length }} 条</span>
+        <button class="ghost-action" type="button" @click="setActiveView('timeline')">
+          返回
+        </button>
       </div>
 
       <input
@@ -474,28 +462,28 @@ async function submitAgentMessage() {
             </button>
 
             <div class="entry-footer">
-              <span>{{ entry.content.length }} 字</span>
-              <button class="delete-action" type="button" @click="removeEntry(entry)">
-                删除
-              </button>
+              <span>{{ formatDateLabel(entry.createdAt) }}</span>
+              <button class="more-action" type="button" @click="removeEntry(entry)">•••</button>
             </div>
           </template>
         </article>
       </div>
     </section>
 
-    <section v-if="activeView === 'calendar'" class="tool-card" aria-labelledby="calendar-title">
+    <section v-if="activeView === 'calendar'" class="tool-card view-panel" aria-labelledby="calendar-title">
       <div class="section-heading">
         <div>
           <p class="eyebrow">日历</p>
           <h2 id="calendar-title">{{ currentMonthTitle }}</h2>
         </div>
-        <button class="ghost-action" type="button" @click="jumpToToday">回到今天</button>
+        <button class="ghost-action" type="button" @click="setActiveView('timeline')">
+          返回
+        </button>
       </div>
 
       <div class="calendar-toolbar" aria-label="月份切换">
         <button class="month-action" type="button" @click="goToPreviousMonth">上个月</button>
-        <span>有记录的日子会被标记</span>
+        <button class="ghost-action" type="button" @click="jumpToToday">回到今天</button>
         <button class="month-action" type="button" @click="goToNextMonth">下个月</button>
       </div>
 
@@ -572,10 +560,8 @@ async function submitAgentMessage() {
               </button>
 
               <div class="entry-footer">
-                <span>{{ entry.content.length }} 字</span>
-                <button class="delete-action" type="button" @click="removeEntry(entry)">
-                  删除
-                </button>
+                <span>{{ formatDateLabel(entry.createdAt) }}</span>
+                <button class="more-action" type="button" @click="removeEntry(entry)">•••</button>
               </div>
             </template>
           </article>
@@ -583,14 +569,48 @@ async function submitAgentMessage() {
       </div>
     </section>
 
-    <section v-if="activeView === 'timeline'" class="timeline" aria-labelledby="timeline-title">
-      <div class="section-heading compact">
-        <div>
-          <p class="eyebrow">回顾</p>
-          <h2 id="timeline-title">日志时间线</h2>
+    <section
+      v-if="composerOpen"
+      class="compose-backdrop"
+      aria-labelledby="compose-title"
+      @click.self="closeComposer"
+    >
+      <div class="compose-sheet">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">新的记录</p>
+            <h2 id="compose-title">今天想记点什么？</h2>
+          </div>
+          <span class="counter">{{ draftCharacterCount }} 字</span>
         </div>
-        <span class="counter">{{ entries.length }} 条</span>
+
+        <input
+          v-model="draftTitle"
+          class="title-input"
+          type="text"
+          maxlength="18"
+          placeholder="标题，可选"
+          aria-label="日志标题"
+        />
+
+        <textarea
+          v-model="draftContent"
+          class="journal-input"
+          placeholder="写下刚刚发生的事、一个念头，或者一句想留住的话。"
+          rows="6"
+        />
+
+        <div class="compose-actions">
+          <button class="ghost-action" type="button" @click="closeComposer">取消</button>
+          <button class="primary-action small" type="button" :disabled="!canSaveDraft" @click="saveDraft">
+            保存这一刻
+          </button>
+        </div>
       </div>
+    </section>
+
+    <section v-if="activeView === 'timeline'" class="timeline" aria-labelledby="timeline-title">
+      <h2 id="timeline-title" class="visually-hidden">日志时间线</h2>
 
       <div v-if="entries.length === 0" class="empty-state">
         <p>还没有日志。</p>
@@ -625,9 +645,9 @@ async function submitAgentMessage() {
               </button>
 
               <div class="entry-footer">
-                <span>{{ entry.content.length }} 字</span>
-                <button class="delete-action" type="button" @click="removeEntry(entry)">
-                  删除
+                <span>{{ formatDateLabel(entry.createdAt) }}</span>
+                <button class="more-action" type="button" aria-label="删除日志" @click="removeEntry(entry)">
+                  •••
                 </button>
               </div>
             </template>
@@ -635,6 +655,16 @@ async function submitAgentMessage() {
         </section>
       </div>
     </section>
+
+    <button
+      v-if="activeView === 'timeline'"
+      class="add-entry-fab"
+      type="button"
+      aria-label="新增日志"
+      @click="openComposer"
+    >
+      +
+    </button>
 
     <div class="agent-layer">
       <button
