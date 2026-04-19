@@ -285,6 +285,27 @@
       "notes": "已完成。标题最大 18 字，保持和现有标题生成长度一致。"
     },
     {
+      "id": "TASK-016",
+      "featureId": "F020",
+      "category": "feature",
+      "description": "iOS 缓冲动效：为主要点击动作、卡片、面板和消息增加 Apple 风格的轻量过渡反馈",
+      "status": "done",
+      "priority": 8,
+      "dependsOn": [
+        "F013"
+      ],
+      "steps": [
+        "按钮点击时有按压缩放、透明度或阴影反馈",
+        "日志卡片、日历日期、视图卡片进入时有轻微淡入上浮效果",
+        "输入框聚焦时有平滑边框、阴影和位移动效",
+        "Agent 头像、对话面板和新消息出现时有轻量弹性反馈",
+        "支持 prefers-reduced-motion，用户关闭动态效果时自动降级"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。主要通过 CSS transition/keyframes 实现，不新增依赖，不改变日志和 Agent 数据逻辑。"
+    },
+    {
       "id": "TASK-006",
       "featureId": "F006",
       "category": "feature",
@@ -634,6 +655,29 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。标题最大 18 字，保持和现有标题生成长度一致。"
+    },
+    {
+      "id": "F020",
+      "title": "iOS 缓冲动效",
+      "status": "done",
+      "priority": 8,
+      "phase": "M2-local-journal",
+      "summary": "让主要点击动作、卡片、面板和消息拥有更像 Apple 系统的轻量缓冲与过渡反馈。",
+      "dependsOn": [
+        "F013"
+      ],
+      "acceptanceCriteria": [
+        "按钮点击时有按压缩放、透明度或阴影反馈。",
+        "日志卡片、日历日期、视图卡片进入时有轻微淡入上浮效果。",
+        "输入框聚焦时有平滑边框、阴影和位移动效。",
+        "Agent 头像、对话面板和新消息出现时有轻量弹性反馈。",
+        "系统开启减少动态效果时，动画会自动降级。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。第一版使用 CSS transition/keyframes，不新增依赖。"
     },
     {
       "id": "F006",
