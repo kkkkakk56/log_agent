@@ -1,4 +1,5 @@
 import type { KnowledgeBase, KnowledgeNote } from '../types/knowledge';
+import { deleteBranchesForContainer, getRecordBranches } from './branchStore';
 
 const BASES_STORAGE_KEY = 'journal-agent.knowledge.bases.v1';
 const NOTES_STORAGE_KEY = 'journal-agent.knowledge.notes.v1';
@@ -31,17 +32,38 @@ const isKnowledgeBase = (value: unknown): value is KnowledgeBase =>
   typeof value.updatedAt === 'string' &&
   (typeof value.deletedAt === 'string' || value.deletedAt === null);
 
-const isKnowledgeNote = (value: unknown): value is KnowledgeNote =>
-  isRecord(value) &&
-  typeof value.id === 'string' &&
-  typeof value.baseId === 'string' &&
-  typeof value.title === 'string' &&
-  typeof value.content === 'string' &&
-  typeof value.sourceUrl === 'string' &&
-  isStringArray(value.tags) &&
-  typeof value.createdAt === 'string' &&
-  typeof value.updatedAt === 'string' &&
-  (typeof value.deletedAt === 'string' || value.deletedAt === null);
+const parseKnowledgeNote = (value: unknown): KnowledgeNote | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.baseId !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.content !== 'string' ||
+    typeof value.sourceUrl !== 'string' ||
+    !isStringArray(value.tags) ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
+    (typeof value.branchId !== 'string' &&
+      value.branchId !== null &&
+      value.branchId !== undefined)
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    baseId: value.baseId,
+    branchId: typeof value.branchId === 'string' ? value.branchId : null,
+    title: value.title,
+    content: value.content,
+    sourceUrl: value.sourceUrl,
+    tags: value.tags,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    deletedAt: value.deletedAt,
+  };
+};
 
 const createId = (prefix: string): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -53,7 +75,7 @@ const createId = (prefix: string): string => {
 
 const readCollection = <T>(
   storageKey: string,
-  guard: (value: unknown) => value is T,
+  parser: (value: unknown) => T | null,
 ): T[] => {
   try {
     const rawItems = localStorage.getItem(storageKey);
@@ -68,7 +90,11 @@ const readCollection = <T>(
       return [];
     }
 
-    return parsedItems.filter(guard);
+    return parsedItems.flatMap((item) => {
+      const parsedItem = parser(item);
+
+      return parsedItem ? [parsedItem] : [];
+    });
   } catch {
     return [];
   }
@@ -84,13 +110,26 @@ const writeCollection = <T>(storageKey: string, items: T[]): boolean => {
 };
 
 const readBases = (): KnowledgeBase[] =>
-  readCollection(BASES_STORAGE_KEY, isKnowledgeBase);
+  readCollection(BASES_STORAGE_KEY, (value) =>
+    isKnowledgeBase(value) ? value : null,
+  );
 
 const writeBases = (bases: KnowledgeBase[]): boolean =>
   writeCollection(BASES_STORAGE_KEY, bases);
 
 const readNotes = (): KnowledgeNote[] =>
-  readCollection(NOTES_STORAGE_KEY, isKnowledgeNote);
+  readCollection(NOTES_STORAGE_KEY, parseKnowledgeNote);
+
+const isAvailableBranch = (baseId: string, branchId: string | null): boolean => {
+  if (branchId === null) {
+    return true;
+  }
+
+  return getRecordBranches({
+    parkType: 'knowledge',
+    containerId: baseId,
+  }).some((branch) => branch.id === branchId);
+};
 
 const writeNotes = (notes: KnowledgeNote[]): boolean =>
   writeCollection(NOTES_STORAGE_KEY, notes);
@@ -235,16 +274,24 @@ export const deleteKnowledgeBase = (id: string): void => {
 
   writeBases(nextBases);
   writeNotes(nextNotes);
+  deleteBranchesForContainer('knowledge', id);
 };
 
 export const createKnowledgeNote = (
   baseId: string,
-  fields: Pick<KnowledgeNote, 'title' | 'content' | 'sourceUrl' | 'tags'>,
+  fields: Pick<
+    KnowledgeNote,
+    'title' | 'content' | 'sourceUrl' | 'tags' | 'branchId'
+  >,
 ): KnowledgeNote | null => {
   const activeBase = getKnowledgeBases().find((base) => base.id === baseId);
   const normalizedContent = fields.content.trim();
 
-  if (!activeBase || !normalizedContent) {
+  if (
+    !activeBase ||
+    !normalizedContent ||
+    !isAvailableBranch(baseId, fields.branchId)
+  ) {
     return null;
   }
 
@@ -252,6 +299,7 @@ export const createKnowledgeNote = (
   const note: KnowledgeNote = {
     id: createId('knowledge-note'),
     baseId,
+    branchId: fields.branchId,
     title: createNoteTitle(normalizedContent, fields.title),
     content: normalizedContent,
     sourceUrl: fields.sourceUrl.trim(),
@@ -272,7 +320,10 @@ export const createKnowledgeNote = (
 
 export const updateKnowledgeNote = (
   id: string,
-  fields: Pick<KnowledgeNote, 'title' | 'content' | 'sourceUrl' | 'tags'>,
+  fields: Pick<
+    KnowledgeNote,
+    'title' | 'content' | 'sourceUrl' | 'tags' | 'branchId'
+  >,
 ): KnowledgeNote | null => {
   const normalizedContent = fields.content.trim();
 
@@ -289,8 +340,16 @@ export const updateKnowledgeNote = (
     return null;
   }
 
+  if (
+    !isAvailableBranch(notes[noteIndex].baseId, fields.branchId) &&
+    fields.branchId !== notes[noteIndex].branchId
+  ) {
+    return null;
+  }
+
   const updatedNote: KnowledgeNote = {
     ...notes[noteIndex],
+    branchId: fields.branchId,
     title: createNoteTitle(normalizedContent, fields.title),
     content: normalizedContent,
     sourceUrl: fields.sourceUrl.trim(),
@@ -329,4 +388,24 @@ export const deleteKnowledgeNote = (id: string): void => {
 
   writeNotes(nextNotes);
   touchKnowledgeBase(nextNotes[noteIndex].baseId, now);
+};
+
+export const clearKnowledgeNoteBranchAssignments = (
+  baseId: string,
+  branchId: string,
+): void => {
+  const notes = readNotes();
+  const now = new Date().toISOString();
+  const nextNotes = notes.map((note) =>
+    note.baseId === baseId && note.branchId === branchId && note.deletedAt === null
+      ? {
+          ...note,
+          branchId: null,
+          updatedAt: now,
+        }
+      : note,
+  );
+
+  writeNotes(nextNotes);
+  touchKnowledgeBase(baseId, now);
 };

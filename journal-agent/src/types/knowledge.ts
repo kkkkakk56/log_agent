@@ -11,6 +11,7 @@ export interface KnowledgeBase {
 export interface KnowledgeNote {
   id: string;
   baseId: string;
+  branchId: string | null;
   title: string;
   content: string;
   sourceUrl: string;

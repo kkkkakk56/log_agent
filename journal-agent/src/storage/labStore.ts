@@ -1,4 +1,5 @@
 import type { LabProject, LabRecord, LabRecordType } from '../types/lab';
+import { deleteBranchesForContainer, getRecordBranches } from './branchStore';
 
 const PROJECTS_STORAGE_KEY = 'journal-agent.lab.projects.v1';
 const RECORDS_STORAGE_KEY = 'journal-agent.lab.records.v1';
@@ -34,17 +35,38 @@ const isLabProject = (value: unknown): value is LabProject =>
   typeof value.updatedAt === 'string' &&
   (typeof value.deletedAt === 'string' || value.deletedAt === null);
 
-const isLabRecord = (value: unknown): value is LabRecord =>
-  isRecord(value) &&
-  typeof value.id === 'string' &&
-  typeof value.projectId === 'string' &&
-  typeof value.title === 'string' &&
-  typeof value.content === 'string' &&
-  isLabRecordType(value.type) &&
-  isStringArray(value.tags) &&
-  typeof value.createdAt === 'string' &&
-  typeof value.updatedAt === 'string' &&
-  (typeof value.deletedAt === 'string' || value.deletedAt === null);
+const parseLabRecord = (value: unknown): LabRecord | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.projectId !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.content !== 'string' ||
+    !isLabRecordType(value.type) ||
+    !isStringArray(value.tags) ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
+    (typeof value.branchId !== 'string' &&
+      value.branchId !== null &&
+      value.branchId !== undefined)
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    projectId: value.projectId,
+    branchId: typeof value.branchId === 'string' ? value.branchId : null,
+    title: value.title,
+    content: value.content,
+    type: value.type,
+    tags: value.tags,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    deletedAt: value.deletedAt,
+  };
+};
 
 const createId = (prefix: string): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -56,7 +78,7 @@ const createId = (prefix: string): string => {
 
 const readCollection = <T>(
   storageKey: string,
-  guard: (value: unknown) => value is T,
+  parser: (value: unknown) => T | null,
 ): T[] => {
   try {
     const rawItems = localStorage.getItem(storageKey);
@@ -71,7 +93,11 @@ const readCollection = <T>(
       return [];
     }
 
-    return parsedItems.filter(guard);
+    return parsedItems.flatMap((item) => {
+      const parsedItem = parser(item);
+
+      return parsedItem ? [parsedItem] : [];
+    });
   } catch {
     return [];
   }
@@ -87,13 +113,26 @@ const writeCollection = <T>(storageKey: string, items: T[]): boolean => {
 };
 
 const readProjects = (): LabProject[] =>
-  readCollection(PROJECTS_STORAGE_KEY, isLabProject);
+  readCollection(PROJECTS_STORAGE_KEY, (value) =>
+    isLabProject(value) ? value : null,
+  );
 
 const writeProjects = (projects: LabProject[]): boolean =>
   writeCollection(PROJECTS_STORAGE_KEY, projects);
 
 const readRecords = (): LabRecord[] =>
-  readCollection(RECORDS_STORAGE_KEY, isLabRecord);
+  readCollection(RECORDS_STORAGE_KEY, parseLabRecord);
+
+const isAvailableBranch = (projectId: string, branchId: string | null): boolean => {
+  if (branchId === null) {
+    return true;
+  }
+
+  return getRecordBranches({
+    parkType: 'lab',
+    containerId: projectId,
+  }).some((branch) => branch.id === branchId);
+};
 
 const writeRecords = (records: LabRecord[]): boolean =>
   writeCollection(RECORDS_STORAGE_KEY, records);
@@ -238,16 +277,22 @@ export const deleteLabProject = (id: string): void => {
 
   writeProjects(nextProjects);
   writeRecords(nextRecords);
+  deleteBranchesForContainer('lab', id);
 };
 
 export const createLabRecord = (
   projectId: string,
-  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags'>,
+  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags' | 'branchId'>,
 ): LabRecord | null => {
   const activeProject = getLabProjects().find((project) => project.id === projectId);
   const normalizedContent = fields.content.trim();
 
-  if (!activeProject || !normalizedContent || !isLabRecordType(fields.type)) {
+  if (
+    !activeProject ||
+    !normalizedContent ||
+    !isLabRecordType(fields.type) ||
+    !isAvailableBranch(projectId, fields.branchId)
+  ) {
     return null;
   }
 
@@ -255,6 +300,7 @@ export const createLabRecord = (
   const record: LabRecord = {
     id: createId('lab-record'),
     projectId,
+    branchId: fields.branchId,
     title: createRecordTitle(normalizedContent, fields.title),
     content: normalizedContent,
     type: fields.type,
@@ -275,7 +321,7 @@ export const createLabRecord = (
 
 export const updateLabRecord = (
   id: string,
-  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags'>,
+  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags' | 'branchId'>,
 ): LabRecord | null => {
   const normalizedContent = fields.content.trim();
 
@@ -292,8 +338,16 @@ export const updateLabRecord = (
     return null;
   }
 
+  if (
+    !isAvailableBranch(records[recordIndex].projectId, fields.branchId) &&
+    fields.branchId !== records[recordIndex].branchId
+  ) {
+    return null;
+  }
+
   const updatedRecord: LabRecord = {
     ...records[recordIndex],
+    branchId: fields.branchId,
     title: createRecordTitle(normalizedContent, fields.title),
     content: normalizedContent,
     type: fields.type,
@@ -332,4 +386,26 @@ export const deleteLabRecord = (id: string): void => {
 
   writeRecords(nextRecords);
   touchProject(nextRecords[recordIndex].projectId, now);
+};
+
+export const clearLabRecordBranchAssignments = (
+  projectId: string,
+  branchId: string,
+): void => {
+  const records = readRecords();
+  const now = new Date().toISOString();
+  const nextRecords = records.map((record) =>
+    record.projectId === projectId &&
+    record.branchId === branchId &&
+    record.deletedAt === null
+      ? {
+          ...record,
+          branchId: null,
+          updatedAt: now,
+        }
+      : record,
+  );
+
+  writeRecords(nextRecords);
+  touchProject(projectId, now);
 };

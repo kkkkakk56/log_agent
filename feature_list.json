@@ -512,7 +512,7 @@
       "featureId": "F030",
       "category": "feature",
       "description": "笔记与做记多分支层级：知识库和做记项目内部支持最多 4 层分支树，用于组织主题、章节、模块或阶段",
-      "status": "planned",
+      "status": "done",
       "priority": 11,
       "dependsOn": [
         "F018",
@@ -528,9 +528,9 @@
         "移动端用折叠树或二级抽屉展示分支，避免常驻挤占主内容区",
         "Agent 写入工具读取分支上下文，新增或编辑笔记、做记时可以指定分支；目标不明确时先追问"
       ],
-      "passes": false,
+      "passes": true,
       "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
-      "notes": "产品层面最多支持 4 层，数据模型可使用 parentId 表达树结构，但 UI 不鼓励无限嵌套；第一版优先保证分类清晰、移动端可用和已有记录迁移安全。"
+      "notes": "已完成。新增统一 Branch 存储与 parentId 树结构，知识笔记和做记记录支持 branchId 归属；UI 提供全部、未分组、树形筛选，以及新增、重命名、移动、归档、删除分支的基础管理；删除分支时直属记录回到未分组、子分支自动上移；Agent 写入上下文与 tool_call 同步支持 branchId。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "TASK-027",
@@ -1267,7 +1267,7 @@
     {
       "id": "F030",
       "title": "笔记与做记多分支层级",
-      "status": "planned",
+      "status": "done",
       "priority": 11,
       "phase": "M3-record-hub",
       "summary": "在知识库和做记项目内部加入最多 4 层的分支树，用主题、章节、模块或阶段组织笔记和做记记录。",
@@ -1290,7 +1290,7 @@
         "npm run build",
         "npx cap sync ios"
       ],
-      "notes": "数据模型建议使用统一 Branch 结构，包含 parkType、containerId、parentId、name、description、order、archivedAt 等字段；第一版不做无限文件夹，重点保证层级清晰和移动端可用。"
+      "notes": "已完成。当前使用统一 Branch 结构管理知识库和做记项目内的分支树，产品层面限制 4 层；移动端通过可展开的分支面板完成筛选与管理；旧记录默认进入未分组，避免已有数据迁移风险。"
     },
     {
       "id": "F031",

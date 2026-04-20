@@ -1,7 +1,9 @@
 import type { JournalEntry } from '../types/journal';
+import type { RecordBranch } from '../types/branch';
 import type { KnowledgeBase, KnowledgeNote } from '../types/knowledge';
 import type { LabProject, LabRecord, LabRecordType } from '../types/lab';
 import { createEntry, getEntries, updateEntry } from '../storage/journalStore';
+import { getRecordBranches } from '../storage/branchStore';
 import {
   createKnowledgeNote,
   getKnowledgeBases,
@@ -14,12 +16,14 @@ import {
   getLabRecords,
   updateLabRecord,
 } from '../storage/labStore';
+import { getBranchPathLabel } from '../utils/branchTree';
 
 const MAX_JOURNAL_ENTRIES = 12;
 const MAX_KNOWLEDGE_BASES = 12;
 const MAX_KNOWLEDGE_NOTES = 20;
 const MAX_LAB_PROJECTS = 12;
 const MAX_LAB_RECORDS = 20;
+const MAX_BRANCHES_PER_SCOPE = 20;
 const MAX_CONTENT_PREVIEW_LENGTH = 220;
 
 type AgentWritableToolName =
@@ -55,6 +59,7 @@ interface JournalUpdateArgs {
 
 interface KnowledgeCreateArgs {
   baseId: string;
+  branchId?: string | null;
   title?: string;
   content: string;
   sourceUrl?: string;
@@ -63,6 +68,7 @@ interface KnowledgeCreateArgs {
 
 interface KnowledgeUpdateArgs {
   noteId: string;
+  branchId?: string | null;
   title?: string;
   contentMode?: RecordContentMode;
   content?: string;
@@ -73,6 +79,7 @@ interface KnowledgeUpdateArgs {
 
 interface LabCreateArgs {
   projectId: string;
+  branchId?: string | null;
   title?: string;
   content: string;
   type: LabRecordType;
@@ -81,6 +88,7 @@ interface LabCreateArgs {
 
 interface LabUpdateArgs {
   recordId: string;
+  branchId?: string | null;
   title?: string;
   contentMode?: RecordContentMode;
   content?: string;
@@ -101,8 +109,10 @@ interface ToolExecutionResult {
 export interface RecordAgentContextOptions {
   activeJournalEntryId?: string | null;
   activeKnowledgeBaseId?: string | null;
+  activeKnowledgeBranchFilterId?: 'all' | 'ungrouped' | string | null;
   selectedKnowledgeNoteId?: string | null;
   activeLabProjectId?: string | null;
+  activeLabBranchFilterId?: 'all' | 'ungrouped' | string | null;
   selectedLabRecordId?: string | null;
 }
 
@@ -223,6 +233,18 @@ const parseContentMode = (value: unknown): RecordContentMode | null => {
   return null;
 };
 
+const parseBranchId = (value: unknown): string | null | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  return typeof value === 'string' ? value : undefined;
+};
+
 const parseJournalCreateArgs = (rawArgs: string): JournalCreateArgs | null => {
   const parsed = parseJsonObject(rawArgs);
 
@@ -288,8 +310,15 @@ const parseKnowledgeCreateArgs = (rawArgs: string): KnowledgeCreateArgs | null =
     return null;
   }
 
+  const branchId = parseBranchId(parsed.branchId);
+
+  if (parsed.branchId !== undefined && branchId === undefined) {
+    return null;
+  }
+
   return {
     baseId: parsed.baseId,
+    branchId,
     title: typeof parsed.title === 'string' ? parsed.title : undefined,
     content: parsed.content,
     sourceUrl: typeof parsed.sourceUrl === 'string' ? parsed.sourceUrl : undefined,
@@ -327,8 +356,15 @@ const parseKnowledgeUpdateArgs = (rawArgs: string): KnowledgeUpdateArgs | null =
     return null;
   }
 
+  const branchId = parseBranchId(parsed.branchId);
+
+  if (parsed.branchId !== undefined && branchId === undefined) {
+    return null;
+  }
+
   return {
     noteId: parsed.noteId,
+    branchId,
     title: typeof parsed.title === 'string' ? parsed.title : undefined,
     contentMode:
       parseContentMode(parsed.contentMode) ??
@@ -360,8 +396,15 @@ const parseLabCreateArgs = (rawArgs: string): LabCreateArgs | null => {
     return null;
   }
 
+  const branchId = parseBranchId(parsed.branchId);
+
+  if (parsed.branchId !== undefined && branchId === undefined) {
+    return null;
+  }
+
   return {
     projectId: parsed.projectId,
+    branchId,
     title: typeof parsed.title === 'string' ? parsed.title : undefined,
     content: parsed.content,
     type: parsed.type,
@@ -392,8 +435,15 @@ const parseLabUpdateArgs = (rawArgs: string): LabUpdateArgs | null => {
     return null;
   }
 
+  const branchId = parseBranchId(parsed.branchId);
+
+  if (parsed.branchId !== undefined && branchId === undefined) {
+    return null;
+  }
+
   return {
     recordId: parsed.recordId,
+    branchId,
     title: typeof parsed.title === 'string' ? parsed.title : undefined,
     contentMode:
       parseContentMode(parsed.contentMode) ??
@@ -482,6 +532,49 @@ const emptyExecutionResult = (resultMessage: string): ToolExecutionResult => ({
   mutatedLabProjectId: null,
   mutatedLabRecordId: null,
 });
+
+const getScopedBranches = (
+  parkType: 'knowledge' | 'lab',
+  containerId: string,
+): RecordBranch[] =>
+  getRecordBranches({
+    parkType,
+    containerId,
+    includeArchived: true,
+  });
+
+const buildBranchSummary = (
+  parkType: 'knowledge' | 'lab',
+  containerId: string,
+  branchId: string | null,
+): string =>
+  branchId
+    ? (() => {
+        const branches = getScopedBranches(parkType, containerId);
+        const branch = branches.find((item) => item.id === branchId) ?? null;
+
+        if (!branch) {
+          return `branchId: ${branchId}`;
+        }
+
+        return `branch: ${getBranchPathLabel(branches, branch.id)} (${branch.id})`;
+      })()
+    : 'branch: 未分组';
+
+const describeBranchFilter = (
+  branches: RecordBranch[],
+  filterId: 'all' | 'ungrouped' | string | null | undefined,
+): string => {
+  if (!filterId || filterId === 'all') {
+    return '全部';
+  }
+
+  if (filterId === 'ungrouped') {
+    return '未分组';
+  }
+
+  return getBranchPathLabel(branches, filterId);
+};
 
 const executeJournalCreateTool = (args: JournalCreateArgs): ToolExecutionResult => {
   const entry = createEntry(args.content, args.title ?? '');
@@ -577,6 +670,7 @@ const executeKnowledgeCreateTool = (args: KnowledgeCreateArgs): ToolExecutionRes
   }
 
   const note = createKnowledgeNote(args.baseId, {
+    branchId: args.branchId ?? null,
     title: args.title ?? '',
     content: args.content,
     sourceUrl: args.sourceUrl ?? '',
@@ -595,6 +689,7 @@ const executeKnowledgeCreateTool = (args: KnowledgeCreateArgs): ToolExecutionRes
     resultMessage: buildToolResultMessage('knowledge.note.create', 'success', [
       `baseId: ${targetBase.id}`,
       `baseName: ${targetBase.name}`,
+      buildBranchSummary('knowledge', targetBase.id, note.branchId),
       `noteId: ${note.id}`,
       `title: ${note.title}`,
       'message: 已成功新增知识笔记。',
@@ -635,6 +730,7 @@ const executeKnowledgeUpdateTool = (args: KnowledgeUpdateArgs): ToolExecutionRes
   }
 
   const updatedNote = updateKnowledgeNote(note.id, {
+    branchId: args.branchId ?? note.branchId,
     title: args.title ?? note.title,
     content: nextContent,
     sourceUrl: args.clearSourceUrl ? '' : args.sourceUrl ?? note.sourceUrl,
@@ -656,6 +752,7 @@ const executeKnowledgeUpdateTool = (args: KnowledgeUpdateArgs): ToolExecutionRes
     resultMessage: buildToolResultMessage('knowledge.note.update', 'success', [
       `baseId: ${updatedNote.baseId}`,
       `baseName: ${targetBase?.name ?? '未知知识库'}`,
+      buildBranchSummary('knowledge', updatedNote.baseId, updatedNote.branchId),
       `noteId: ${updatedNote.id}`,
       `title: ${updatedNote.title}`,
       `contentMode: ${args.contentMode ?? 'replace'}`,
@@ -683,6 +780,7 @@ const executeLabCreateTool = (args: LabCreateArgs): ToolExecutionResult => {
   }
 
   const record = createLabRecord(args.projectId, {
+    branchId: args.branchId ?? null,
     title: args.title ?? '',
     content: args.content,
     type: args.type,
@@ -701,6 +799,7 @@ const executeLabCreateTool = (args: LabCreateArgs): ToolExecutionResult => {
     resultMessage: buildToolResultMessage('lab.record.create', 'success', [
       `projectId: ${targetProject.id}`,
       `projectName: ${targetProject.name}`,
+      buildBranchSummary('lab', targetProject.id, record.branchId),
       `recordId: ${record.id}`,
       `title: ${record.title}`,
       `type: ${LAB_RECORD_TYPE_LABELS[record.type]}`,
@@ -742,6 +841,7 @@ const executeLabUpdateTool = (args: LabUpdateArgs): ToolExecutionResult => {
   }
 
   const updatedRecord = updateLabRecord(record.id, {
+    branchId: args.branchId ?? record.branchId,
     title: args.title ?? record.title,
     content: nextContent,
     type: args.type ?? record.type,
@@ -763,6 +863,7 @@ const executeLabUpdateTool = (args: LabUpdateArgs): ToolExecutionResult => {
     resultMessage: buildToolResultMessage('lab.record.update', 'success', [
       `projectId: ${updatedRecord.projectId}`,
       `projectName: ${targetProject?.name ?? '未知项目'}`,
+      buildBranchSummary('lab', updatedRecord.projectId, updatedRecord.branchId),
       `recordId: ${updatedRecord.id}`,
       `title: ${updatedRecord.title}`,
       `type: ${LAB_RECORD_TYPE_LABELS[updatedRecord.type]}`,
@@ -808,9 +909,25 @@ const serializeKnowledgeBase = (base: KnowledgeBase, index: number): string =>
     `description: ${base.description || '无'}`,
   ].join('\n');
 
+const serializeBranch = (
+  branch: RecordBranch,
+  branches: RecordBranch[],
+  index: number,
+): string =>
+  [
+    `### 分支 ${index + 1}`,
+    `id: ${branch.id}`,
+    `name: ${branch.name}`,
+    `path: ${getBranchPathLabel(branches, branch.id)}`,
+    `depth: ${getBranchPathLabel(branches, branch.id).split(' / ').length}`,
+    `archived: ${branch.archivedAt ? '是' : '否'}`,
+    `updatedAt: ${formatDateTime(branch.updatedAt)}`,
+  ].join('\n');
+
 const serializeKnowledgeNotePreview = (
   note: KnowledgeNote,
   baseName: string,
+  branchLabel: string,
   index: number,
 ): string =>
   [
@@ -818,6 +935,7 @@ const serializeKnowledgeNotePreview = (
     `id: ${note.id}`,
     `baseId: ${note.baseId}`,
     `baseName: ${baseName}`,
+    `branch: ${branchLabel}`,
     `title: ${note.title}`,
     `updatedAt: ${formatDateTime(note.updatedAt)}`,
     `sourceUrl: ${note.sourceUrl || '无'}`,
@@ -828,12 +946,14 @@ const serializeKnowledgeNotePreview = (
 const serializeSelectedKnowledgeNote = (
   note: KnowledgeNote,
   baseName: string,
+  branchLabel: string,
 ): string =>
   [
     '### 当前选中的笔记',
     `id: ${note.id}`,
     `baseId: ${note.baseId}`,
     `baseName: ${baseName}`,
+    `branch: ${branchLabel}`,
     `title: ${note.title}`,
     `updatedAt: ${formatDateTime(note.updatedAt)}`,
     `sourceUrl: ${note.sourceUrl || '无'}`,
@@ -854,6 +974,7 @@ const serializeLabProject = (project: LabProject, index: number): string =>
 const serializeLabRecordPreview = (
   record: LabRecord,
   projectName: string,
+  branchLabel: string,
   index: number,
 ): string =>
   [
@@ -861,6 +982,7 @@ const serializeLabRecordPreview = (
     `id: ${record.id}`,
     `projectId: ${record.projectId}`,
     `projectName: ${projectName}`,
+    `branch: ${branchLabel}`,
     `title: ${record.title}`,
     `type: ${LAB_RECORD_TYPE_LABELS[record.type]}`,
     `updatedAt: ${formatDateTime(record.updatedAt)}`,
@@ -871,12 +993,14 @@ const serializeLabRecordPreview = (
 const serializeSelectedLabRecord = (
   record: LabRecord,
   projectName: string,
+  branchLabel: string,
 ): string =>
   [
     '### 当前选中的做记记录',
     `id: ${record.id}`,
     `projectId: ${record.projectId}`,
     `projectName: ${projectName}`,
+    `branch: ${branchLabel}`,
     `title: ${record.title}`,
     `type: ${LAB_RECORD_TYPE_LABELS[record.type]}`,
     `updatedAt: ${formatDateTime(record.updatedAt)}`,
@@ -892,6 +1016,8 @@ export const buildRecordAgentContextTool = (
   labRecords: LabRecord[],
   options: RecordAgentContextOptions = {},
 ): RecordAgentContextToolResult => {
+  const totalKnowledgeBranches = getRecordBranches({ parkType: 'knowledge' }).length;
+  const totalLabBranches = getRecordBranches({ parkType: 'lab' }).length;
   const listedJournalEntries = sortByUpdatedAtDesc(entries).slice(0, MAX_JOURNAL_ENTRIES);
   const selectedJournalEntry =
     entries.find((entry) => entry.id === options.activeJournalEntryId) ?? null;
@@ -910,16 +1036,32 @@ export const buildRecordAgentContextTool = (
   const listedLabRecords = sortByUpdatedAtDesc(
     labRecords.filter((record) => record.id !== selectedLabRecord?.id),
   ).slice(0, MAX_LAB_RECORDS);
+  const activeKnowledgeScopeBranches = options.activeKnowledgeBaseId
+    ? getScopedBranches('knowledge', options.activeKnowledgeBaseId)
+    : [];
+  const activeKnowledgeVisibleBranches = activeKnowledgeScopeBranches
+    .filter((branch) => branch.archivedAt === null)
+    .slice(0, MAX_BRANCHES_PER_SCOPE);
+  const activeLabScopeBranches = options.activeLabProjectId
+    ? getScopedBranches('lab', options.activeLabProjectId)
+    : [];
+  const activeLabVisibleBranches = activeLabScopeBranches
+    .filter((branch) => branch.archivedAt === null)
+    .slice(0, MAX_BRANCHES_PER_SCOPE);
   const knowledgeBaseNameMap = new Map(
     knowledgeBases.map((base) => [base.id, base.name]),
   );
   const labProjectNameMap = new Map(
     labProjects.map((project) => [project.id, project.name]),
   );
+  const readKnowledgeBranchLabel = (baseId: string, branchId: string | null): string =>
+    getBranchPathLabel(getScopedBranches('knowledge', baseId), branchId);
+  const readLabBranchLabel = (projectId: string, branchId: string | null): string =>
+    getBranchPathLabel(getScopedBranches('lab', projectId), branchId);
   const statusLabel = [
     `心记 ${entries.length} 条`,
-    `笔记 ${knowledgeBases.length} 库 / ${knowledgeNotes.length} 条`,
-    `做记 ${labProjects.length} 项 / ${labRecords.length} 条`,
+    `笔记 ${knowledgeBases.length} 库 / ${knowledgeNotes.length} 条 / ${totalKnowledgeBranches} 分支`,
+    `做记 ${labProjects.length} 项 / ${labRecords.length} 条 / ${totalLabBranches} 分支`,
   ].join(' · ');
 
   const toolMessage = [
@@ -928,8 +1070,10 @@ export const buildRecordAgentContextTool = (
     `心记总数: ${entries.length}`,
     `知识库总数: ${knowledgeBases.length}`,
     `知识笔记总数: ${knowledgeNotes.length}`,
+    `知识分支总数: ${totalKnowledgeBranches}`,
     `做记项目总数: ${labProjects.length}`,
     `做记记录总数: ${labRecords.length}`,
+    `做记分支总数: ${totalLabBranches}`,
     buildSelectedItemLabel(
       entries,
       options.activeJournalEntryId,
@@ -944,6 +1088,10 @@ export const buildRecordAgentContextTool = (
       '当前界面选中的知识库已不可用。',
       '当前界面选中的知识库',
     ),
+    `当前界面知识分支范围: ${describeBranchFilter(
+      activeKnowledgeScopeBranches.filter((branch) => branch.archivedAt === null),
+      options.activeKnowledgeBranchFilterId,
+    )}`,
     selectedKnowledgeNote
       ? `当前界面选中的笔记: ${selectedKnowledgeNote.title} (${selectedKnowledgeNote.id})`
       : '当前界面没有选中知识笔记。',
@@ -954,6 +1102,10 @@ export const buildRecordAgentContextTool = (
       '当前界面选中的做记项目已不可用。',
       '当前界面选中的做记项目',
     ),
+    `当前界面做记分支范围: ${describeBranchFilter(
+      activeLabScopeBranches.filter((branch) => branch.archivedAt === null),
+      options.activeLabBranchFilterId,
+    )}`,
     selectedLabRecord
       ? `当前界面选中的做记记录: ${selectedLabRecord.title} (${selectedLabRecord.id})`
       : '当前界面没有选中做记记录。',
@@ -962,7 +1114,7 @@ export const buildRecordAgentContextTool = (
     '- 只允许使用 journal.entry.create / journal.entry.update / knowledge.note.create / knowledge.note.update / lab.record.create / lab.record.update。',
     '- 严禁尝试删除任何心记、知识笔记、做记记录、知识库或做记项目，也不要承诺已经删除。',
     '- 只有当用户明确要求“新增”或“编辑”时，才允许发起写入。',
-    '- 如果目标知识库、目标做记项目、目标记录或目标日志不明确，先向用户追问，不要猜。',
+    '- 如果目标知识库、目标做记项目、目标分支、目标记录或目标日志不明确，先向用户追问，不要猜。',
     '- 编辑时如果只改标题、标签、链接或做记类型，可以使用 contentMode: "keep" 并省略 content。',
     '- 每次需要写入时先输出 tool_call；等收到 tool_result 后，再用自然语言向用户确认。',
     '',
@@ -974,16 +1126,16 @@ export const buildRecordAgentContextTool = (
     '{"entryId":"心记id","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文"}',
     '[/tool_call]',
     '[tool_call: knowledge.note.create]',
-    '{"baseId":"知识库id","title":"可选标题","content":"正文","sourceUrl":"可选链接","tags":["标签1","标签2"]}',
+    '{"baseId":"知识库id","branchId":"可选分支id或null","title":"可选标题","content":"正文","sourceUrl":"可选链接","tags":["标签1","标签2"]}',
     '[/tool_call]',
     '[tool_call: knowledge.note.update]',
-    '{"noteId":"笔记id","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","sourceUrl":"可选新链接","clearSourceUrl":false,"tags":["标签1","标签2"]}',
+    '{"noteId":"笔记id","branchId":"可选分支id或null","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","sourceUrl":"可选新链接","clearSourceUrl":false,"tags":["标签1","标签2"]}',
     '[/tool_call]',
     '[tool_call: lab.record.create]',
-    '{"projectId":"做记项目id","title":"可选标题","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
+    '{"projectId":"做记项目id","branchId":"可选分支id或null","title":"可选标题","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
     '[/tool_call]',
     '[tool_call: lab.record.update]',
-    '{"recordId":"做记记录id","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
+    '{"recordId":"做记记录id","branchId":"可选分支id或null","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
     '[/tool_call]',
     '',
     '## 心记区',
@@ -999,10 +1151,24 @@ export const buildRecordAgentContextTool = (
       ? listedKnowledgeBases.map(serializeKnowledgeBase).join('\n\n')
       : '当前没有可用知识库。',
     '',
+    activeKnowledgeVisibleBranches.length > 0
+      ? activeKnowledgeVisibleBranches
+          .map((branch, index) =>
+            serializeBranch(branch, activeKnowledgeScopeBranches, index),
+          )
+          .join('\n\n')
+      : options.activeKnowledgeBaseId
+        ? '当前知识库还没有可用分支。'
+        : '当前没有选中的知识库分支。',
+    '',
     selectedKnowledgeNote
       ? serializeSelectedKnowledgeNote(
           selectedKnowledgeNote,
           knowledgeBaseNameMap.get(selectedKnowledgeNote.baseId) ?? '未知知识库',
+          readKnowledgeBranchLabel(
+            selectedKnowledgeNote.baseId,
+            selectedKnowledgeNote.branchId,
+          ),
         )
       : '当前没有选中的知识笔记全文。',
     '',
@@ -1012,6 +1178,7 @@ export const buildRecordAgentContextTool = (
             serializeKnowledgeNotePreview(
               note,
               knowledgeBaseNameMap.get(note.baseId) ?? '未知知识库',
+              readKnowledgeBranchLabel(note.baseId, note.branchId),
               index,
             ),
           )
@@ -1023,10 +1190,24 @@ export const buildRecordAgentContextTool = (
       ? listedLabProjects.map(serializeLabProject).join('\n\n')
       : '当前没有可用做记项目。',
     '',
+    activeLabVisibleBranches.length > 0
+      ? activeLabVisibleBranches
+          .map((branch, index) =>
+            serializeBranch(branch, activeLabScopeBranches, index),
+          )
+          .join('\n\n')
+      : options.activeLabProjectId
+        ? '当前做记项目还没有可用分支。'
+        : '当前没有选中的做记项目分支。',
+    '',
     selectedLabRecord
       ? serializeSelectedLabRecord(
           selectedLabRecord,
           labProjectNameMap.get(selectedLabRecord.projectId) ?? '未知项目',
+          readLabBranchLabel(
+            selectedLabRecord.projectId,
+            selectedLabRecord.branchId,
+          ),
         )
       : '当前没有选中的做记记录全文。',
     '',
@@ -1036,6 +1217,7 @@ export const buildRecordAgentContextTool = (
             serializeLabRecordPreview(
               record,
               labProjectNameMap.get(record.projectId) ?? '未知项目',
+              readLabBranchLabel(record.projectId, record.branchId),
               index,
             ),
           )

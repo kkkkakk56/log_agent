@@ -27,8 +27,10 @@ interface SendAgentMessageOptions {
   labRecords: LabRecord[];
   activeJournalEntryId?: string | null;
   activeKnowledgeBaseId?: string | null;
+  activeKnowledgeBranchFilterId?: 'all' | 'ungrouped' | string | null;
   selectedKnowledgeNoteId?: string | null;
   activeLabProjectId?: string | null;
+  activeLabBranchFilterId?: 'all' | 'ungrouped' | string | null;
   selectedLabRecordId?: string | null;
 }
 
@@ -55,7 +57,7 @@ const AGENT_SYSTEM_PROMPT = [
   '你还可以帮助用户新增或编辑三记内容：心记、笔记、做记。',
   '你只能使用受限工具协议，绝不能删除任何心记、知识笔记、做记记录、知识库或做记项目。',
   '当且仅当用户明确要求“新增”或“编辑”时，才允许发起写入。',
-  '如果目标区域、目标知识库、目标做记项目或目标记录不明确，先追问，不要猜。',
+  '如果目标区域、目标知识库、目标做记项目、目标分支或目标记录不明确，先追问，不要猜。',
   '编辑时如果只改标题、标签、链接或做记类型，可以把 contentMode 设为 keep 并省略 content。',
   '可用 tool_call 如下，只输出 block 本身，不要附带解释：',
   '[tool_call: journal.entry.create]',
@@ -65,16 +67,16 @@ const AGENT_SYSTEM_PROMPT = [
   '{"entryId":"心记id","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文"}',
   '[/tool_call]',
   '[tool_call: knowledge.note.create]',
-  '{"baseId":"知识库id","title":"可选标题","content":"正文","sourceUrl":"可选链接","tags":["标签1","标签2"]}',
+  '{"baseId":"知识库id","branchId":"可选分支id或null","title":"可选标题","content":"正文","sourceUrl":"可选链接","tags":["标签1","标签2"]}',
   '[/tool_call]',
   '[tool_call: knowledge.note.update]',
-  '{"noteId":"笔记id","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","sourceUrl":"可选新链接","clearSourceUrl":false,"tags":["标签1","标签2"]}',
+  '{"noteId":"笔记id","branchId":"可选分支id或null","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","sourceUrl":"可选新链接","clearSourceUrl":false,"tags":["标签1","标签2"]}',
   '[/tool_call]',
   '[tool_call: lab.record.create]',
-  '{"projectId":"做记项目id","title":"可选标题","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
+  '{"projectId":"做记项目id","branchId":"可选分支id或null","title":"可选标题","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
   '[/tool_call]',
   '[tool_call: lab.record.update]',
-  '{"recordId":"做记记录id","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
+  '{"recordId":"做记记录id","branchId":"可选分支id或null","title":"可选新标题","contentMode":"replace|append|prepend|keep","content":"正文","type":"operation|review","tags":["标签1","标签2"]}',
   '[/tool_call]',
   '收到 tool_result 后，再用自然语言向用户确认是否成功，不要再次输出 tool_call。',
   '语气保持温和、简洁、像一个可靠的私人记录助手。',
@@ -175,8 +177,10 @@ const createMockReply = async (
   labRecords: LabRecord[],
   activeJournalEntryId: string | null | undefined,
   activeKnowledgeBaseId: string | null | undefined,
+  activeKnowledgeBranchFilterId: 'all' | 'ungrouped' | string | null | undefined,
   selectedKnowledgeNoteId: string | null | undefined,
   activeLabProjectId: string | null | undefined,
+  activeLabBranchFilterId: 'all' | 'ungrouped' | string | null | undefined,
   selectedLabRecordId: string | null | undefined,
 ): Promise<string> => {
   const journalContext = await buildJournalRagContextTool(entries, message);
@@ -189,8 +193,10 @@ const createMockReply = async (
     {
       activeJournalEntryId,
       activeKnowledgeBaseId,
+      activeKnowledgeBranchFilterId,
       selectedKnowledgeNoteId,
       activeLabProjectId,
+      activeLabBranchFilterId,
       selectedLabRecordId,
     },
   );
@@ -218,8 +224,10 @@ const buildAgentApiMessages = (
   latestUserMessage: string,
   activeJournalEntryId: string | null | undefined,
   activeKnowledgeBaseId: string | null | undefined,
+  activeKnowledgeBranchFilterId: 'all' | 'ungrouped' | string | null | undefined,
   selectedKnowledgeNoteId: string | null | undefined,
   activeLabProjectId: string | null | undefined,
+  activeLabBranchFilterId: 'all' | 'ungrouped' | string | null | undefined,
   selectedLabRecordId: string | null | undefined,
 ): Promise<AgentApiMessage[]> =>
   Promise.all([
@@ -233,8 +241,10 @@ const buildAgentApiMessages = (
       {
         activeJournalEntryId,
         activeKnowledgeBaseId,
+        activeKnowledgeBranchFilterId,
         selectedKnowledgeNoteId,
         activeLabProjectId,
+        activeLabBranchFilterId,
         selectedLabRecordId,
       },
     ),
@@ -330,8 +340,10 @@ export const sendAgentMessage = async ({
   labRecords,
   activeJournalEntryId,
   activeKnowledgeBaseId,
+  activeKnowledgeBranchFilterId,
   selectedKnowledgeNoteId,
   activeLabProjectId,
+  activeLabBranchFilterId,
   selectedLabRecordId,
 }: SendAgentMessageOptions): Promise<SendAgentMessageResult> => {
   const latestUserMessage = [...messages]
@@ -367,8 +379,10 @@ export const sendAgentMessage = async ({
           labRecords,
           activeJournalEntryId,
           activeKnowledgeBaseId,
+          activeKnowledgeBranchFilterId,
           selectedKnowledgeNoteId,
           activeLabProjectId,
+          activeLabBranchFilterId,
           selectedLabRecordId,
         ),
       ),
@@ -391,8 +405,10 @@ export const sendAgentMessage = async ({
     latestUserMessage.content,
     activeJournalEntryId,
     activeKnowledgeBaseId,
+    activeKnowledgeBranchFilterId,
     selectedKnowledgeNoteId,
     activeLabProjectId,
+    activeLabBranchFilterId,
     selectedLabRecordId,
   );
   const assistantContent = await requestAgentCompletion(apiMessages);

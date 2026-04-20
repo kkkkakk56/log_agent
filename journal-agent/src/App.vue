@@ -8,6 +8,7 @@ import {
   type CSSProperties,
 } from 'vue';
 import type { CalendarDay } from './utils/date';
+import type { RecordBranch } from './types/branch';
 import type { JournalEntry } from './types/journal';
 import type { KnowledgeBase, KnowledgeNote } from './types/knowledge';
 import type { LabProject, LabRecord, LabRecordType } from './types/lab';
@@ -57,7 +58,16 @@ import {
   updateEntry,
 } from './storage/journalStore';
 import {
+  archiveRecordBranch,
+  createRecordBranch,
+  deleteRecordBranch,
+  getRecordBranches,
+  unarchiveRecordBranch,
+  updateRecordBranch,
+} from './storage/branchStore';
+import {
   createKnowledgeBase,
+  clearKnowledgeNoteBranchAssignments,
   createKnowledgeNote,
   deleteKnowledgeBase,
   deleteKnowledgeNote,
@@ -67,6 +77,7 @@ import {
   updateKnowledgeNote,
 } from './storage/knowledgeStore';
 import {
+  clearLabRecordBranchAssignments,
   createLabProject,
   createLabRecord,
   deleteLabProject,
@@ -95,6 +106,13 @@ import {
   groupEntriesByDate,
   startOfMonth,
 } from './utils/date';
+import {
+  MAX_BRANCH_DEPTH,
+  flattenBranchTree,
+  getBranchDepth,
+  getBranchDescendantIds,
+  getBranchPathLabel,
+} from './utils/branchTree';
 
 type ActivePark = 'journal' | 'knowledge' | 'lab' | 'todo' | 'plan';
 type ActiveView = 'timeline' | 'search' | 'calendar';
@@ -112,6 +130,7 @@ type LabInspectorMode =
   | 'record-view'
   | 'record-edit'
   | 'record-create';
+type BranchFilterId = 'all' | 'ungrouped' | string;
 
 interface ParkSummary {
   id: ActivePark;
@@ -148,6 +167,13 @@ interface TodoSourceItem {
   isMissing: boolean;
 }
 
+interface BranchTreeItem {
+  branch: RecordBranch;
+  depth: number;
+  itemCount: number;
+  pathLabel: string;
+}
+
 const LAB_RECORD_TYPE_META: Record<LabRecordType, { label: string }> = {
   operation: { label: '操作' },
   review: { label: '复盘' },
@@ -157,6 +183,7 @@ const AGENT_FAB_SAFE_MARGIN = 16;
 const AGENT_FAB_DEFAULT_WIDTH = 112;
 const AGENT_FAB_DEFAULT_HEIGHT = 52;
 const AGENT_DRAG_THRESHOLD = 6;
+const BRANCH_UNGROUPED_VALUE = '__ungrouped__';
 
 const labRecordTypeOptions: Array<{
   value: LabRecordType;
@@ -195,6 +222,7 @@ const knowledgeBases = ref<KnowledgeBase[]>(getKnowledgeBases());
 const knowledgeNotes = ref<KnowledgeNote[]>(getKnowledgeNotes());
 const labProjects = ref<LabProject[]>(getLabProjects());
 const labRecords = ref<LabRecord[]>(getLabRecords());
+const recordBranches = ref<RecordBranch[]>(getRecordBranches({ includeArchived: true }));
 const reminders = ref<RecordReminder[]>(getActiveReminders());
 const todos = ref<TodoMark[]>(getTodos());
 const activePark = ref<ActivePark>('journal');
@@ -215,16 +243,21 @@ const editingKnowledgeBaseName = ref(knowledgeBases.value[0]?.name ?? '');
 const editingKnowledgeBaseDescription = ref(knowledgeBases.value[0]?.description ?? '');
 const editingKnowledgeBaseTags = ref(knowledgeBases.value[0]?.tags.join('，') ?? '');
 const selectedKnowledgeNoteId = ref<string | null>(null);
+const activeKnowledgeBranchFilterId = ref<BranchFilterId>('all');
+const knowledgeBranchPanelOpen = ref(false);
+const knowledgeArchivedBranchesOpen = ref(false);
 const knowledgeInspectorMode = ref<KnowledgeInspectorMode>('base');
 const newKnowledgeNoteTitle = ref('');
 const newKnowledgeNoteContent = ref('');
 const newKnowledgeNoteSourceUrl = ref('');
 const newKnowledgeNoteTags = ref('');
+const newKnowledgeNoteBranchValue = ref(BRANCH_UNGROUPED_VALUE);
 const editingKnowledgeNoteId = ref<string | null>(null);
 const editingKnowledgeNoteTitle = ref('');
 const editingKnowledgeNoteContent = ref('');
 const editingKnowledgeNoteSourceUrl = ref('');
 const editingKnowledgeNoteTags = ref('');
+const editingKnowledgeNoteBranchValue = ref(BRANCH_UNGROUPED_VALUE);
 const activeLabProjectId = ref<string | null>(labProjects.value[0]?.id ?? null);
 const labDrawerOpen = ref(labProjects.value.length === 0);
 const labProjectComposerOpen = ref(labProjects.value.length === 0);
@@ -235,16 +268,21 @@ const editingLabProjectName = ref(labProjects.value[0]?.name ?? '');
 const editingLabProjectDescription = ref(labProjects.value[0]?.description ?? '');
 const editingLabProjectTags = ref(labProjects.value[0]?.tags.join('，') ?? '');
 const selectedLabRecordId = ref<string | null>(null);
+const activeLabBranchFilterId = ref<BranchFilterId>('all');
+const labBranchPanelOpen = ref(false);
+const labArchivedBranchesOpen = ref(false);
 const labInspectorMode = ref<LabInspectorMode>('project');
 const newLabRecordTitle = ref('');
 const newLabRecordContent = ref('');
 const newLabRecordType = ref<LabRecordType>('operation');
 const newLabRecordTags = ref('');
+const newLabRecordBranchValue = ref(BRANCH_UNGROUPED_VALUE);
 const editingLabRecordId = ref<string | null>(null);
 const editingLabRecordTitle = ref('');
 const editingLabRecordContent = ref('');
 const editingLabRecordType = ref<LabRecordType>('operation');
 const editingLabRecordTags = ref('');
+const editingLabRecordBranchValue = ref(BRANCH_UNGROUPED_VALUE);
 const searchQuery = ref('');
 const calendarMonth = ref(startOfMonth(new Date()));
 const selectedDateKey = ref(getLocalDateKey(new Date()));
@@ -353,7 +391,28 @@ const activeKnowledgeBase = computed(
     null,
 );
 
-const activeKnowledgeNotes = computed(() => {
+const activeKnowledgeBaseBranches = computed(() => {
+  const baseId = activeKnowledgeBase.value?.id;
+
+  if (!baseId) {
+    return [];
+  }
+
+  return recordBranches.value.filter(
+    (branch) =>
+      branch.parkType === 'knowledge' && branch.containerId === baseId,
+  );
+});
+
+const activeKnowledgeBranches = computed(() =>
+  activeKnowledgeBaseBranches.value.filter((branch) => branch.archivedAt === null),
+);
+
+const archivedKnowledgeBranches = computed(() =>
+  activeKnowledgeBaseBranches.value.filter((branch) => branch.archivedAt !== null),
+);
+
+const activeKnowledgeBaseNotes = computed(() => {
   const baseId = activeKnowledgeBase.value?.id;
 
   if (!baseId) {
@@ -363,19 +422,72 @@ const activeKnowledgeNotes = computed(() => {
   return knowledgeNotes.value.filter((note) => note.baseId === baseId);
 });
 
+const activeKnowledgeNotes = computed(() =>
+  activeKnowledgeBaseNotes.value.filter((note) =>
+    matchesBranchFilter(
+      note.branchId,
+      activeKnowledgeBranches.value,
+      activeKnowledgeBranchFilterId.value,
+    ),
+  ),
+);
+
+const knowledgeBranchTreeItems = computed(() =>
+  buildBranchTreeItems(
+    activeKnowledgeBranches.value,
+    activeKnowledgeBaseNotes.value.map((note) => note.branchId),
+  ),
+);
+
+const selectedKnowledgeBranch = computed(
+  () =>
+    activeKnowledgeBranches.value.find(
+      (branch) => branch.id === activeKnowledgeBranchFilterId.value,
+    ) ?? null,
+);
+
 const selectedKnowledgeNote = computed(
   () =>
-    activeKnowledgeNotes.value.find(
+    activeKnowledgeBaseNotes.value.find(
       (note) => note.id === selectedKnowledgeNoteId.value,
     ) ?? null,
 );
+
+const knowledgeBranchSelectOptions = computed(() =>
+  buildBranchSelectOptions(
+    activeKnowledgeBranches.value,
+    activeKnowledgeBaseBranches.value,
+    selectedKnowledgeNote.value?.branchId ?? null,
+  ),
+);
+
 const activeLabProject = computed(
   () =>
     labProjects.value.find((project) => project.id === activeLabProjectId.value) ??
     null,
 );
 
-const activeLabRecords = computed(() => {
+const activeLabProjectBranches = computed(() => {
+  const projectId = activeLabProject.value?.id;
+
+  if (!projectId) {
+    return [];
+  }
+
+  return recordBranches.value.filter(
+    (branch) => branch.parkType === 'lab' && branch.containerId === projectId,
+  );
+});
+
+const activeLabBranches = computed(() =>
+  activeLabProjectBranches.value.filter((branch) => branch.archivedAt === null),
+);
+
+const archivedLabBranches = computed(() =>
+  activeLabProjectBranches.value.filter((branch) => branch.archivedAt !== null),
+);
+
+const activeLabProjectRecords = computed(() => {
   const projectId = activeLabProject.value?.id;
 
   if (!projectId) {
@@ -384,6 +496,30 @@ const activeLabRecords = computed(() => {
 
   return labRecords.value.filter((record) => record.projectId === projectId);
 });
+
+const activeLabRecords = computed(() =>
+  activeLabProjectRecords.value.filter((record) =>
+    matchesBranchFilter(
+      record.branchId,
+      activeLabBranches.value,
+      activeLabBranchFilterId.value,
+    ),
+  ),
+);
+
+const labBranchTreeItems = computed(() =>
+  buildBranchTreeItems(
+    activeLabBranches.value,
+    activeLabProjectRecords.value.map((record) => record.branchId),
+  ),
+);
+
+const selectedLabBranch = computed(
+  () =>
+    activeLabBranches.value.find(
+      (branch) => branch.id === activeLabBranchFilterId.value,
+    ) ?? null,
+);
 
 const activeOpenLabRecords = computed(() =>
   activeLabRecords.value.filter((record) => !isCardTodoDone('project', record.id)),
@@ -404,8 +540,18 @@ const activeCompletedLabRecordItems = computed(() =>
 
 const selectedLabRecord = computed(
   () =>
-    activeLabRecords.value.find((record) => record.id === selectedLabRecordId.value) ??
+    activeLabProjectRecords.value.find(
+      (record) => record.id === selectedLabRecordId.value,
+    ) ??
     null,
+);
+
+const labBranchSelectOptions = computed(() =>
+  buildBranchSelectOptions(
+    activeLabBranches.value,
+    activeLabProjectBranches.value,
+    selectedLabRecord.value?.branchId ?? null,
+  ),
 );
 
 const canCreateKnowledgeBase = computed(
@@ -526,8 +672,10 @@ const agentRecordContext = computed(() => {
     {
       activeJournalEntryId: editingId.value,
       activeKnowledgeBaseId: activeKnowledgeBase.value?.id ?? null,
+      activeKnowledgeBranchFilterId: activeKnowledgeBranchFilterId.value,
       selectedKnowledgeNoteId: selectedKnowledgeNote.value?.id ?? null,
       activeLabProjectId: activeLabProject.value?.id ?? null,
+      activeLabBranchFilterId: activeLabBranchFilterId.value,
       selectedLabRecordId: selectedLabRecord.value?.id ?? null,
     },
   );
@@ -1253,6 +1401,9 @@ function focusTodoSource(todo: TodoMark) {
 
   activePark.value = 'lab';
   activeLabProjectId.value = record?.projectId ?? activeLabProjectId.value;
+  if (record) {
+    ensureLabBranchFilterForRecord(record);
+  }
   selectedLabRecordId.value = todo.noteId;
   labInspectorMode.value = 'record-view';
   labDrawerOpen.value = false;
@@ -1645,6 +1796,9 @@ function focusReminderTarget(reminder: RecordReminder) {
 
     activePark.value = 'knowledge';
     activeKnowledgeBaseId.value = note?.baseId ?? reminder.parentId;
+    if (note) {
+      ensureKnowledgeBranchFilterForNote(note);
+    }
     selectedKnowledgeNoteId.value = reminder.targetId;
     knowledgeInspectorMode.value = 'note-view';
     knowledgeDrawerOpen.value = false;
@@ -1656,6 +1810,9 @@ function focusReminderTarget(reminder: RecordReminder) {
 
   activePark.value = 'lab';
   activeLabProjectId.value = record?.projectId ?? reminder.parentId;
+  if (record) {
+    ensureLabBranchFilterForRecord(record);
+  }
   selectedLabRecordId.value = reminder.targetId;
   labInspectorMode.value = 'record-view';
   labDrawerOpen.value = false;
@@ -1760,6 +1917,211 @@ function getLabRecordTypeLabel(type: LabRecordType): string {
   return LAB_RECORD_TYPE_META[type].label;
 }
 
+function refreshRecordBranches() {
+  recordBranches.value = getRecordBranches({ includeArchived: true });
+}
+
+function encodeBranchValue(branchId: string | null): string {
+  return branchId ?? BRANCH_UNGROUPED_VALUE;
+}
+
+function decodeBranchValue(branchValue: string): string | null {
+  return branchValue === BRANCH_UNGROUPED_VALUE ? null : branchValue;
+}
+
+function isSpecificBranchFilter(filterId: BranchFilterId): boolean {
+  return filterId !== 'all' && filterId !== 'ungrouped';
+}
+
+function matchesBranchFilter(
+  branchId: string | null,
+  activeBranches: RecordBranch[],
+  filterId: BranchFilterId,
+): boolean {
+  if (filterId === 'all') {
+    return true;
+  }
+
+  if (filterId === 'ungrouped') {
+    return branchId === null;
+  }
+
+  if (branchId === null) {
+    return false;
+  }
+
+  const scopedBranchIds = new Set<string>([
+    filterId,
+    ...getBranchDescendantIds(activeBranches, filterId),
+  ]);
+
+  return scopedBranchIds.has(branchId);
+}
+
+function countItemsInBranchScope(
+  itemBranchIds: Array<string | null>,
+  activeBranches: RecordBranch[],
+  filterId: BranchFilterId,
+): number {
+  return itemBranchIds.filter((branchId) =>
+    matchesBranchFilter(branchId, activeBranches, filterId),
+  ).length;
+}
+
+function buildBranchTreeItems(
+  activeBranches: RecordBranch[],
+  itemBranchIds: Array<string | null>,
+): BranchTreeItem[] {
+  return flattenBranchTree(activeBranches).map(({ branch, depth }) => ({
+    branch,
+    depth,
+    itemCount: countItemsInBranchScope(itemBranchIds, activeBranches, branch.id),
+    pathLabel: getBranchPathLabel(activeBranches, branch.id),
+  }));
+}
+
+function buildBranchSelectOptions(
+  activeBranches: RecordBranch[],
+  allBranches: RecordBranch[],
+  currentBranchId: string | null,
+): Array<{ value: string; label: string }> {
+  const options = flattenBranchTree(activeBranches).map(({ branch }) => ({
+    value: branch.id,
+    label: getBranchPathLabel(activeBranches, branch.id),
+  }));
+
+  if (
+    currentBranchId &&
+    !options.some((option) => option.value === currentBranchId)
+  ) {
+    const archivedBranch =
+      allBranches.find((branch) => branch.id === currentBranchId) ?? null;
+
+    if (archivedBranch) {
+      options.unshift({
+        value: archivedBranch.id,
+        label: `${getBranchPathLabel(allBranches, archivedBranch.id)}（已归档）`,
+      });
+    }
+  }
+
+  return options;
+}
+
+function describeBranchFilter(
+  filterId: BranchFilterId,
+  allBranches: RecordBranch[],
+): string {
+  if (filterId === 'all') {
+    return '全部';
+  }
+
+  if (filterId === 'ungrouped') {
+    return '未分组';
+  }
+
+  return getBranchPathLabel(allBranches, filterId);
+}
+
+function promptForBranchName(title: string, defaultValue = ''): string | null {
+  const branchName = window.prompt(title, defaultValue)?.trim() ?? '';
+
+  return branchName ? branchName : null;
+}
+
+function promptForBranchParent(
+  branchLabel: string,
+  activeBranches: RecordBranch[],
+  excludedBranchIds: string[] = [],
+  currentParentId: string | null = null,
+): string | null | undefined {
+  const options = flattenBranchTree(activeBranches)
+    .filter(({ branch }) => !excludedBranchIds.includes(branch.id))
+    .map(({ branch }) => `${branch.id}  ${getBranchPathLabel(activeBranches, branch.id)}`);
+  const promptMessage = [
+    `给「${branchLabel}」选择新的上级分支。`,
+    `输入 root 或留空，表示放到第 1 层。`,
+    `当前上级: ${
+      currentParentId ? getBranchPathLabel(activeBranches, currentParentId) : '第 1 层'
+    }`,
+    '',
+    ...options,
+  ].join('\n');
+  const input = window.prompt(promptMessage, currentParentId ?? 'root');
+
+  if (input === null) {
+    return undefined;
+  }
+
+  const normalizedInput = input.trim();
+
+  if (!normalizedInput || normalizedInput === 'root') {
+    return null;
+  }
+
+  return activeBranches.some((branch) => branch.id === normalizedInput)
+    ? normalizedInput
+    : undefined;
+}
+
+function setKnowledgeBranchFilter(filterId: BranchFilterId) {
+  activeKnowledgeBranchFilterId.value = filterId;
+
+  if (
+    selectedKnowledgeNote.value &&
+    !matchesBranchFilter(
+      selectedKnowledgeNote.value.branchId,
+      activeKnowledgeBranches.value,
+      filterId,
+    )
+  ) {
+    selectedKnowledgeNoteId.value = null;
+    knowledgeInspectorMode.value = 'base';
+    cancelKnowledgeNoteEditing();
+  }
+}
+
+function setLabBranchFilter(filterId: BranchFilterId) {
+  activeLabBranchFilterId.value = filterId;
+
+  if (
+    selectedLabRecord.value &&
+    !matchesBranchFilter(
+      selectedLabRecord.value.branchId,
+      activeLabBranches.value,
+      filterId,
+    )
+  ) {
+    selectedLabRecordId.value = null;
+    labInspectorMode.value = 'project';
+    cancelLabRecordEditing();
+  }
+}
+
+function ensureKnowledgeBranchFilterForNote(note: KnowledgeNote) {
+  if (
+    !matchesBranchFilter(
+      note.branchId,
+      activeKnowledgeBranches.value,
+      activeKnowledgeBranchFilterId.value,
+    )
+  ) {
+    setKnowledgeBranchFilter(note.branchId ?? 'ungrouped');
+  }
+}
+
+function ensureLabBranchFilterForRecord(record: LabRecord) {
+  if (
+    !matchesBranchFilter(
+      record.branchId,
+      activeLabBranches.value,
+      activeLabBranchFilterId.value,
+    )
+  ) {
+    setLabBranchFilter(record.branchId ?? 'ungrouped');
+  }
+}
+
 function resetNewKnowledgeBaseForm() {
   newKnowledgeBaseName.value = '';
   newKnowledgeBaseDescription.value = '';
@@ -1777,11 +2139,20 @@ function resetNewKnowledgeNoteForm() {
   newKnowledgeNoteContent.value = '';
   newKnowledgeNoteSourceUrl.value = '';
   newKnowledgeNoteTags.value = '';
+  newKnowledgeNoteBranchValue.value =
+    activeKnowledgeBranchFilterId.value === 'all'
+      ? BRANCH_UNGROUPED_VALUE
+      : encodeBranchValue(
+          activeKnowledgeBranchFilterId.value === 'ungrouped'
+            ? null
+            : activeKnowledgeBranchFilterId.value,
+        );
 }
 
 function refreshKnowledgeData() {
   knowledgeBases.value = getKnowledgeBases();
   knowledgeNotes.value = getKnowledgeNotes();
+  refreshRecordBranches();
 
   if (
     activeKnowledgeBaseId.value &&
@@ -1795,8 +2166,19 @@ function refreshKnowledgeData() {
   }
 
   if (
+    isSpecificBranchFilter(activeKnowledgeBranchFilterId.value) &&
+    !activeKnowledgeBranches.value.some(
+      (branch) => branch.id === activeKnowledgeBranchFilterId.value,
+    )
+  ) {
+    activeKnowledgeBranchFilterId.value = 'all';
+  }
+
+  if (
     selectedKnowledgeNoteId.value &&
-    !activeKnowledgeNotes.value.some((note) => note.id === selectedKnowledgeNoteId.value)
+    !activeKnowledgeBaseNotes.value.some(
+      (note) => note.id === selectedKnowledgeNoteId.value,
+    )
   ) {
     selectedKnowledgeNoteId.value = null;
   }
@@ -1824,9 +2206,185 @@ function getKnowledgeNoteCount(baseId: string): number {
   return knowledgeNotes.value.filter((note) => note.baseId === baseId).length;
 }
 
+function toggleKnowledgeBranchPanel() {
+  knowledgeBranchPanelOpen.value = !knowledgeBranchPanelOpen.value;
+}
+
+function createKnowledgeBranch(parentId: string | null = null) {
+  if (!activeKnowledgeBase.value) {
+    return;
+  }
+
+  if (
+    parentId &&
+    getBranchDepth(activeKnowledgeBranches.value, parentId) >= MAX_BRANCH_DEPTH
+  ) {
+    window.alert(`分支最多支持 ${MAX_BRANCH_DEPTH} 层，当前分支下面不能继续新增。`);
+    return;
+  }
+
+  const parentLabel = parentId
+    ? `给「${getBranchPathLabel(activeKnowledgeBranches.value, parentId)}」新增子分支`
+    : '新增知识分支';
+  const branchName = promptForBranchName(parentLabel);
+
+  if (!branchName) {
+    return;
+  }
+
+  const branch = createRecordBranch({
+    parkType: 'knowledge',
+    containerId: activeKnowledgeBase.value.id,
+    parentId,
+    name: branchName,
+  });
+
+  if (!branch) {
+    window.alert('分支创建失败，可能是名称为空，或者层级已经超过 4 层。');
+    return;
+  }
+
+  refreshKnowledgeData();
+  knowledgeBranchPanelOpen.value = true;
+  setKnowledgeBranchFilter(branch.id);
+}
+
+function renameSelectedKnowledgeBranch() {
+  if (!selectedKnowledgeBranch.value) {
+    return;
+  }
+
+  const nextName = promptForBranchName(
+    '重命名知识分支',
+    selectedKnowledgeBranch.value.name,
+  );
+
+  if (!nextName) {
+    return;
+  }
+
+  const updatedBranch = updateRecordBranch(selectedKnowledgeBranch.value.id, {
+    name: nextName,
+    description: selectedKnowledgeBranch.value.description,
+    parentId: selectedKnowledgeBranch.value.parentId,
+  });
+
+  if (!updatedBranch) {
+    window.alert('分支重命名失败。');
+    return;
+  }
+
+  refreshKnowledgeData();
+  setKnowledgeBranchFilter(updatedBranch.id);
+}
+
+function moveSelectedKnowledgeBranch() {
+  if (!selectedKnowledgeBranch.value) {
+    return;
+  }
+
+  const nextParentId = promptForBranchParent(
+    selectedKnowledgeBranch.value.name,
+    activeKnowledgeBranches.value,
+    [
+      selectedKnowledgeBranch.value.id,
+      ...getBranchDescendantIds(
+        activeKnowledgeBranches.value,
+        selectedKnowledgeBranch.value.id,
+      ),
+    ],
+    selectedKnowledgeBranch.value.parentId,
+  );
+
+  if (nextParentId === undefined) {
+    return;
+  }
+
+  const updatedBranch = updateRecordBranch(selectedKnowledgeBranch.value.id, {
+    name: selectedKnowledgeBranch.value.name,
+    description: selectedKnowledgeBranch.value.description,
+    parentId: nextParentId,
+  });
+
+  if (!updatedBranch) {
+    window.alert(`移动失败。请确认目标分支存在，并且不会超过 ${MAX_BRANCH_DEPTH} 层。`);
+    return;
+  }
+
+  refreshKnowledgeData();
+  setKnowledgeBranchFilter(updatedBranch.id);
+}
+
+function archiveSelectedKnowledgeBranch() {
+  if (!selectedKnowledgeBranch.value) {
+    return;
+  }
+
+  const shouldArchive = window.confirm(
+    `确定归档「${selectedKnowledgeBranch.value.name}」吗？这个分支和它下面的子分支会先从分支树里收起，记录不会被删除。`,
+  );
+
+  if (!shouldArchive) {
+    return;
+  }
+
+  const archivedBranch = archiveRecordBranch(selectedKnowledgeBranch.value.id);
+
+  if (!archivedBranch) {
+    window.alert('分支归档失败。');
+    return;
+  }
+
+  refreshKnowledgeData();
+  setKnowledgeBranchFilter('all');
+}
+
+function restoreKnowledgeBranch(branch: RecordBranch) {
+  const restoredBranch = unarchiveRecordBranch(branch.id);
+
+  if (!restoredBranch) {
+    window.alert('恢复分支失败。');
+    return;
+  }
+
+  refreshKnowledgeData();
+  knowledgeArchivedBranchesOpen.value = false;
+  knowledgeBranchPanelOpen.value = true;
+  setKnowledgeBranchFilter(restoredBranch.id);
+}
+
+function deleteSelectedKnowledgeBranch() {
+  if (!activeKnowledgeBase.value || !selectedKnowledgeBranch.value) {
+    return;
+  }
+
+  const shouldDelete = window.confirm(
+    `确定删除「${selectedKnowledgeBranch.value.name}」吗？直属笔记会回到未分组，子分支会自动上移，不会删除任何笔记。`,
+  );
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  clearKnowledgeNoteBranchAssignments(
+    activeKnowledgeBase.value.id,
+    selectedKnowledgeBranch.value.id,
+  );
+  const deletedBranch = deleteRecordBranch(selectedKnowledgeBranch.value.id);
+
+  if (!deletedBranch) {
+    window.alert('删除分支失败。');
+    return;
+  }
+
+  refreshKnowledgeData();
+  setKnowledgeBranchFilter('all');
+}
+
 function selectKnowledgeBase(baseId: string) {
   activeKnowledgeBaseId.value = baseId;
   knowledgeDrawerOpen.value = false;
+  activeKnowledgeBranchFilterId.value = 'all';
   selectedKnowledgeNoteId.value = null;
   knowledgeInspectorMode.value = 'base';
   resetNewKnowledgeNoteForm();
@@ -1872,6 +2430,7 @@ function saveNewKnowledgeBase() {
   }
 
   activeKnowledgeBaseId.value = base.id;
+  activeKnowledgeBranchFilterId.value = 'all';
   knowledgeDrawerOpen.value = false;
   knowledgeBaseComposerOpen.value = false;
   selectedKnowledgeNoteId.value = null;
@@ -1932,6 +2491,7 @@ function removeKnowledgeBase(base: KnowledgeBase) {
       .map((note) => cancelTargetReminders('knowledge-note', note.id)),
   );
   deleteKnowledgeBase(base.id);
+  activeKnowledgeBranchFilterId.value = 'all';
   selectedKnowledgeNoteId.value = null;
   knowledgeInspectorMode.value = 'base';
   cancelKnowledgeNoteEditing();
@@ -1959,12 +2519,15 @@ function saveNewKnowledgeNote() {
     content: newKnowledgeNoteContent.value,
     sourceUrl: newKnowledgeNoteSourceUrl.value,
     tags: parseTagInput(newKnowledgeNoteTags.value),
+    branchId: decodeBranchValue(newKnowledgeNoteBranchValue.value),
   });
 
   if (!note) {
+    window.alert('笔记保存失败。请确认分支仍然可用。');
     return;
   }
 
+  ensureKnowledgeBranchFilterForNote(note);
   selectedKnowledgeNoteId.value = note.id;
   knowledgeInspectorMode.value = 'note-view';
   resetNewKnowledgeNoteForm();
@@ -1972,6 +2535,7 @@ function saveNewKnowledgeNote() {
 }
 
 function selectKnowledgeNote(note: KnowledgeNote) {
+  ensureKnowledgeBranchFilterForNote(note);
   selectedKnowledgeNoteId.value = note.id;
   knowledgeInspectorMode.value = 'note-view';
   resetNewKnowledgeNoteForm();
@@ -1979,6 +2543,7 @@ function selectKnowledgeNote(note: KnowledgeNote) {
 }
 
 function startKnowledgeNoteEditing(note: KnowledgeNote) {
+  ensureKnowledgeBranchFilterForNote(note);
   selectedKnowledgeNoteId.value = note.id;
   knowledgeInspectorMode.value = 'note-edit';
   editingKnowledgeNoteId.value = note.id;
@@ -1986,6 +2551,7 @@ function startKnowledgeNoteEditing(note: KnowledgeNote) {
   editingKnowledgeNoteContent.value = note.content;
   editingKnowledgeNoteSourceUrl.value = note.sourceUrl;
   editingKnowledgeNoteTags.value = note.tags.join('，');
+  editingKnowledgeNoteBranchValue.value = encodeBranchValue(note.branchId);
 }
 
 function cancelKnowledgeNoteEditing() {
@@ -1994,6 +2560,7 @@ function cancelKnowledgeNoteEditing() {
   editingKnowledgeNoteContent.value = '';
   editingKnowledgeNoteSourceUrl.value = '';
   editingKnowledgeNoteTags.value = '';
+  editingKnowledgeNoteBranchValue.value = BRANCH_UNGROUPED_VALUE;
 }
 
 function saveKnowledgeNoteEditing() {
@@ -2006,12 +2573,15 @@ function saveKnowledgeNoteEditing() {
     content: editingKnowledgeNoteContent.value,
     sourceUrl: editingKnowledgeNoteSourceUrl.value,
     tags: parseTagInput(editingKnowledgeNoteTags.value),
+    branchId: decodeBranchValue(editingKnowledgeNoteBranchValue.value),
   });
 
   if (!updatedNote) {
+    window.alert('笔记更新失败。请确认分支仍然可用。');
     return;
   }
 
+  ensureKnowledgeBranchFilterForNote(updatedNote);
   selectedKnowledgeNoteId.value = updatedNote.id;
   knowledgeInspectorMode.value = 'note-view';
   cancelKnowledgeNoteEditing();
@@ -2057,11 +2627,20 @@ function resetNewLabRecordForm() {
   newLabRecordContent.value = '';
   newLabRecordType.value = 'operation';
   newLabRecordTags.value = '';
+  newLabRecordBranchValue.value =
+    activeLabBranchFilterId.value === 'all'
+      ? BRANCH_UNGROUPED_VALUE
+      : encodeBranchValue(
+          activeLabBranchFilterId.value === 'ungrouped'
+            ? null
+            : activeLabBranchFilterId.value,
+        );
 }
 
 function refreshLabData() {
   labProjects.value = getLabProjects();
   labRecords.value = getLabRecords();
+  refreshRecordBranches();
 
   if (
     activeLabProjectId.value &&
@@ -2075,8 +2654,19 @@ function refreshLabData() {
   }
 
   if (
+    isSpecificBranchFilter(activeLabBranchFilterId.value) &&
+    !activeLabBranches.value.some(
+      (branch) => branch.id === activeLabBranchFilterId.value,
+    )
+  ) {
+    activeLabBranchFilterId.value = 'all';
+  }
+
+  if (
     selectedLabRecordId.value &&
-    !activeLabRecords.value.some((record) => record.id === selectedLabRecordId.value)
+    !activeLabProjectRecords.value.some(
+      (record) => record.id === selectedLabRecordId.value,
+    )
   ) {
     selectedLabRecordId.value = null;
   }
@@ -2104,9 +2694,185 @@ function getLabRecordCount(projectId: string): number {
   return labRecords.value.filter((record) => record.projectId === projectId).length;
 }
 
+function toggleLabBranchPanel() {
+  labBranchPanelOpen.value = !labBranchPanelOpen.value;
+}
+
+function createLabBranch(parentId: string | null = null) {
+  if (!activeLabProject.value) {
+    return;
+  }
+
+  if (
+    parentId &&
+    getBranchDepth(activeLabBranches.value, parentId) >= MAX_BRANCH_DEPTH
+  ) {
+    window.alert(`分支最多支持 ${MAX_BRANCH_DEPTH} 层，当前分支下面不能继续新增。`);
+    return;
+  }
+
+  const parentLabel = parentId
+    ? `给「${getBranchPathLabel(activeLabBranches.value, parentId)}」新增子分支`
+    : '新增做记分支';
+  const branchName = promptForBranchName(parentLabel);
+
+  if (!branchName) {
+    return;
+  }
+
+  const branch = createRecordBranch({
+    parkType: 'lab',
+    containerId: activeLabProject.value.id,
+    parentId,
+    name: branchName,
+  });
+
+  if (!branch) {
+    window.alert('分支创建失败，可能是名称为空，或者层级已经超过 4 层。');
+    return;
+  }
+
+  refreshLabData();
+  labBranchPanelOpen.value = true;
+  setLabBranchFilter(branch.id);
+}
+
+function renameSelectedLabBranch() {
+  if (!selectedLabBranch.value) {
+    return;
+  }
+
+  const nextName = promptForBranchName(
+    '重命名做记分支',
+    selectedLabBranch.value.name,
+  );
+
+  if (!nextName) {
+    return;
+  }
+
+  const updatedBranch = updateRecordBranch(selectedLabBranch.value.id, {
+    name: nextName,
+    description: selectedLabBranch.value.description,
+    parentId: selectedLabBranch.value.parentId,
+  });
+
+  if (!updatedBranch) {
+    window.alert('分支重命名失败。');
+    return;
+  }
+
+  refreshLabData();
+  setLabBranchFilter(updatedBranch.id);
+}
+
+function moveSelectedLabBranch() {
+  if (!selectedLabBranch.value) {
+    return;
+  }
+
+  const nextParentId = promptForBranchParent(
+    selectedLabBranch.value.name,
+    activeLabBranches.value,
+    [
+      selectedLabBranch.value.id,
+      ...getBranchDescendantIds(
+        activeLabBranches.value,
+        selectedLabBranch.value.id,
+      ),
+    ],
+    selectedLabBranch.value.parentId,
+  );
+
+  if (nextParentId === undefined) {
+    return;
+  }
+
+  const updatedBranch = updateRecordBranch(selectedLabBranch.value.id, {
+    name: selectedLabBranch.value.name,
+    description: selectedLabBranch.value.description,
+    parentId: nextParentId,
+  });
+
+  if (!updatedBranch) {
+    window.alert(`移动失败。请确认目标分支存在，并且不会超过 ${MAX_BRANCH_DEPTH} 层。`);
+    return;
+  }
+
+  refreshLabData();
+  setLabBranchFilter(updatedBranch.id);
+}
+
+function archiveSelectedLabBranch() {
+  if (!selectedLabBranch.value) {
+    return;
+  }
+
+  const shouldArchive = window.confirm(
+    `确定归档「${selectedLabBranch.value.name}」吗？这个分支和它下面的子分支会先从分支树里收起，记录不会被删除。`,
+  );
+
+  if (!shouldArchive) {
+    return;
+  }
+
+  const archivedBranch = archiveRecordBranch(selectedLabBranch.value.id);
+
+  if (!archivedBranch) {
+    window.alert('分支归档失败。');
+    return;
+  }
+
+  refreshLabData();
+  setLabBranchFilter('all');
+}
+
+function restoreLabBranch(branch: RecordBranch) {
+  const restoredBranch = unarchiveRecordBranch(branch.id);
+
+  if (!restoredBranch) {
+    window.alert('恢复分支失败。');
+    return;
+  }
+
+  refreshLabData();
+  labArchivedBranchesOpen.value = false;
+  labBranchPanelOpen.value = true;
+  setLabBranchFilter(restoredBranch.id);
+}
+
+function deleteSelectedLabBranch() {
+  if (!activeLabProject.value || !selectedLabBranch.value) {
+    return;
+  }
+
+  const shouldDelete = window.confirm(
+    `确定删除「${selectedLabBranch.value.name}」吗？直属记录会回到未分组，子分支会自动上移，不会删除任何做记记录。`,
+  );
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  clearLabRecordBranchAssignments(
+    activeLabProject.value.id,
+    selectedLabBranch.value.id,
+  );
+  const deletedBranch = deleteRecordBranch(selectedLabBranch.value.id);
+
+  if (!deletedBranch) {
+    window.alert('删除分支失败。');
+    return;
+  }
+
+  refreshLabData();
+  setLabBranchFilter('all');
+}
+
 function selectLabProject(projectId: string) {
   activeLabProjectId.value = projectId;
   labDrawerOpen.value = false;
+  activeLabBranchFilterId.value = 'all';
   selectedLabRecordId.value = null;
   labInspectorMode.value = 'project';
   resetNewLabRecordForm();
@@ -2152,6 +2918,7 @@ function saveNewLabProject() {
   }
 
   activeLabProjectId.value = project.id;
+  activeLabBranchFilterId.value = 'all';
   labDrawerOpen.value = false;
   labProjectComposerOpen.value = false;
   selectedLabRecordId.value = null;
@@ -2212,6 +2979,7 @@ function removeLabProject(project: LabProject) {
       .map((record) => cancelTargetReminders('lab-record', record.id)),
   );
   deleteLabProject(project.id);
+  activeLabBranchFilterId.value = 'all';
   deleteTodosForNotes(
     'project',
     labRecords.value
@@ -2246,12 +3014,15 @@ function saveNewLabRecord() {
     content: newLabRecordContent.value,
     type: newLabRecordType.value,
     tags: parseTagInput(newLabRecordTags.value),
+    branchId: decodeBranchValue(newLabRecordBranchValue.value),
   });
 
   if (!record) {
+    window.alert('记录保存失败。请确认分支仍然可用。');
     return;
   }
 
+  ensureLabBranchFilterForRecord(record);
   selectedLabRecordId.value = record.id;
   labInspectorMode.value = 'record-view';
   resetNewLabRecordForm();
@@ -2259,6 +3030,7 @@ function saveNewLabRecord() {
 }
 
 function selectLabRecord(record: LabRecord) {
+  ensureLabBranchFilterForRecord(record);
   selectedLabRecordId.value = record.id;
   labInspectorMode.value = 'record-view';
   resetNewLabRecordForm();
@@ -2266,6 +3038,7 @@ function selectLabRecord(record: LabRecord) {
 }
 
 function startLabRecordEditing(record: LabRecord) {
+  ensureLabBranchFilterForRecord(record);
   selectedLabRecordId.value = record.id;
   labInspectorMode.value = 'record-edit';
   editingLabRecordId.value = record.id;
@@ -2273,6 +3046,7 @@ function startLabRecordEditing(record: LabRecord) {
   editingLabRecordContent.value = record.content;
   editingLabRecordType.value = record.type;
   editingLabRecordTags.value = record.tags.join('，');
+  editingLabRecordBranchValue.value = encodeBranchValue(record.branchId);
 }
 
 function cancelLabRecordEditing() {
@@ -2281,6 +3055,7 @@ function cancelLabRecordEditing() {
   editingLabRecordContent.value = '';
   editingLabRecordType.value = 'operation';
   editingLabRecordTags.value = '';
+  editingLabRecordBranchValue.value = BRANCH_UNGROUPED_VALUE;
 }
 
 function saveLabRecordEditing() {
@@ -2293,12 +3068,15 @@ function saveLabRecordEditing() {
     content: editingLabRecordContent.value,
     type: editingLabRecordType.value,
     tags: parseTagInput(editingLabRecordTags.value),
+    branchId: decodeBranchValue(editingLabRecordBranchValue.value),
   });
 
   if (!updatedRecord) {
+    window.alert('记录更新失败。请确认分支仍然可用。');
     return;
   }
 
+  ensureLabBranchFilterForRecord(updatedRecord);
   selectedLabRecordId.value = updatedRecord.id;
   labInspectorMode.value = 'record-view';
   cancelLabRecordEditing();
@@ -2724,8 +3502,10 @@ async function submitAgentMessage() {
       labRecords: labRecords.value,
       activeJournalEntryId: editingId.value,
       activeKnowledgeBaseId: activeKnowledgeBase.value?.id ?? null,
+      activeKnowledgeBranchFilterId: activeKnowledgeBranchFilterId.value,
       selectedKnowledgeNoteId: selectedKnowledgeNote.value?.id ?? null,
       activeLabProjectId: activeLabProject.value?.id ?? null,
+      activeLabBranchFilterId: activeLabBranchFilterId.value,
       selectedLabRecordId: selectedLabRecord.value?.id ?? null,
     });
     appendAgentConversationMessage(conversation.id, result.assistantMessage);
@@ -2750,7 +3530,13 @@ async function submitAgentMessage() {
       }
 
       if (result.mutatedKnowledgeNoteId) {
+        const mutatedNote =
+          knowledgeNotes.value.find((note) => note.id === result.mutatedKnowledgeNoteId) ??
+          null;
         activePark.value = 'knowledge';
+        if (mutatedNote) {
+          ensureKnowledgeBranchFilterForNote(mutatedNote);
+        }
         selectedKnowledgeNoteId.value = result.mutatedKnowledgeNoteId;
         knowledgeInspectorMode.value = 'note-view';
       }
@@ -2760,7 +3546,13 @@ async function submitAgentMessage() {
       }
 
       if (result.mutatedLabRecordId) {
+        const mutatedRecord =
+          labRecords.value.find((record) => record.id === result.mutatedLabRecordId) ??
+          null;
         activePark.value = 'lab';
+        if (mutatedRecord) {
+          ensureLabBranchFilterForRecord(mutatedRecord);
+        }
         selectedLabRecordId.value = result.mutatedLabRecordId;
         labInspectorMode.value = 'record-view';
       }
@@ -3759,10 +4551,22 @@ onBeforeUnmount(() => {
 
       <section class="knowledge-shell" aria-label="知识笔记工作台">
         <section class="knowledge-notes-pane" aria-labelledby="knowledge-notes-title">
-          <div class="section-heading compact knowledge-pane-heading">
-            <h2 id="knowledge-notes-title">
-              {{ activeKnowledgeBase ? activeKnowledgeBase.name : '选择仓库' }}
-            </h2>
+          <div class="section-heading compact knowledge-pane-heading knowledge-pane-toolbar">
+            <div>
+              <h2 id="knowledge-notes-title">
+                {{ activeKnowledgeBase ? activeKnowledgeBase.name : '选择仓库' }}
+              </h2>
+              <small v-if="activeKnowledgeBase" class="branch-scope-label">
+                {{ describeBranchFilter(activeKnowledgeBranchFilterId, activeKnowledgeBaseBranches) }}
+                ·
+                {{ activeKnowledgeNotes.length }} 条
+              </small>
+            </div>
+            <div v-if="activeKnowledgeBase" class="knowledge-pane-actions">
+              <button class="ghost-action" type="button" @click="toggleKnowledgeBranchPanel">
+                {{ knowledgeBranchPanelOpen ? '收起分支' : '分支' }}
+              </button>
+            </div>
           </div>
 
           <div v-if="!activeKnowledgeBase" class="empty-state knowledge-empty-state">
@@ -3773,28 +4577,163 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div v-else-if="activeKnowledgeNotes.length === 0" class="empty-state knowledge-empty-state">
-            <p>这个仓库还没有笔记。</p>
-            <span>点右下角的浮动按钮，先写下第一条知识记录。</span>
-          </div>
+          <template v-else>
+            <section v-if="knowledgeBranchPanelOpen" class="branch-panel" aria-label="知识分支管理">
+              <div class="branch-panel-header">
+                <div>
+                  <p class="eyebrow">分支筛选</p>
+                  <strong>
+                    {{ describeBranchFilter(activeKnowledgeBranchFilterId, activeKnowledgeBaseBranches) }}
+                  </strong>
+                </div>
+                <div class="branch-panel-actions">
+                  <button class="ghost-action" type="button" @click="createKnowledgeBranch(null)">
+                    新建根分支
+                  </button>
+                  <button
+                    class="ghost-action"
+                    type="button"
+                    :disabled="!selectedKnowledgeBranch"
+                    @click="createKnowledgeBranch(selectedKnowledgeBranch?.id ?? null)"
+                  >
+                    子分支
+                  </button>
+                </div>
+              </div>
 
-          <div v-else class="knowledge-note-items">
-            <button
-              v-for="note in activeKnowledgeNotes"
-              :key="note.id"
-              type="button"
-              class="knowledge-note-list-item"
-              :class="{ active: selectedKnowledgeNoteId === note.id }"
-              @click="selectKnowledgeNote(note)"
+              <div class="branch-filter-list">
+                <button
+                  type="button"
+                  class="branch-filter-item"
+                  :class="{ active: activeKnowledgeBranchFilterId === 'all' }"
+                  @click="setKnowledgeBranchFilter('all')"
+                >
+                  <span>全部</span>
+                  <small>{{ activeKnowledgeBaseNotes.length }}</small>
+                </button>
+                <button
+                  type="button"
+                  class="branch-filter-item"
+                  :class="{ active: activeKnowledgeBranchFilterId === 'ungrouped' }"
+                  @click="setKnowledgeBranchFilter('ungrouped')"
+                >
+                  <span>未分组</span>
+                  <small>
+                    {{
+                      countItemsInBranchScope(
+                        activeKnowledgeBaseNotes.map((note) => note.branchId),
+                        activeKnowledgeBranches,
+                        'ungrouped',
+                      )
+                    }}
+                  </small>
+                </button>
+                <button
+                  v-for="item in knowledgeBranchTreeItems"
+                  :key="item.branch.id"
+                  type="button"
+                  class="branch-filter-item"
+                  :class="{ active: activeKnowledgeBranchFilterId === item.branch.id }"
+                  :style="{ paddingLeft: `${12 + (item.depth - 1) * 18}px` }"
+                  @click="setKnowledgeBranchFilter(item.branch.id)"
+                >
+                  <span>{{ item.branch.name }}</span>
+                  <small>{{ item.itemCount }}</small>
+                </button>
+              </div>
+
+              <div v-if="selectedKnowledgeBranch" class="branch-selection-card">
+                <div>
+                  <strong>{{ selectedKnowledgeBranch.name }}</strong>
+                  <small>{{ getBranchPathLabel(activeKnowledgeBaseBranches, selectedKnowledgeBranch.id) }}</small>
+                </div>
+                <div class="branch-selection-actions">
+                  <button class="ghost-action" type="button" @click="renameSelectedKnowledgeBranch">
+                    重命名
+                  </button>
+                  <button class="ghost-action" type="button" @click="moveSelectedKnowledgeBranch">
+                    移动
+                  </button>
+                  <button class="ghost-action" type="button" @click="archiveSelectedKnowledgeBranch">
+                    归档
+                  </button>
+                  <button class="delete-action" type="button" @click="deleteSelectedKnowledgeBranch">
+                    删除
+                  </button>
+                </div>
+              </div>
+
+              <section
+                v-if="archivedKnowledgeBranches.length > 0"
+                class="branch-archived-panel"
+              >
+                <button
+                  class="completed-todo-heading branch-archived-toggle"
+                  type="button"
+                  @click="knowledgeArchivedBranchesOpen = !knowledgeArchivedBranchesOpen"
+                >
+                  <span>{{ knowledgeArchivedBranchesOpen ? '▾' : '▸' }} 已归档</span>
+                  <small>{{ archivedKnowledgeBranches.length }}</small>
+                </button>
+                <div v-if="knowledgeArchivedBranchesOpen" class="branch-archived-list">
+                  <div
+                    v-for="branch in archivedKnowledgeBranches"
+                    :key="branch.id"
+                    class="branch-archived-item"
+                  >
+                    <div>
+                      <strong>{{ branch.name }}</strong>
+                      <small>{{ getBranchPathLabel(activeKnowledgeBaseBranches, branch.id) }}</small>
+                    </div>
+                    <button class="ghost-action" type="button" @click="restoreKnowledgeBranch(branch)">
+                      恢复
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <div
+              v-if="activeKnowledgeNotes.length === 0"
+              class="empty-state knowledge-empty-state"
             >
-              <span class="entry-time">
-                {{ getDateGroupLabel(note.updatedAt) }} · {{ formatEntryTime(note.updatedAt) }}
+              <p>
+                {{
+                  activeKnowledgeBranchFilterId === 'all'
+                    ? '这个仓库还没有笔记。'
+                    : '这个分支范围里还没有笔记。'
+                }}
+              </p>
+              <span>
+                {{
+                  activeKnowledgeBranchFilterId === 'all'
+                    ? '点右下角的浮动按钮，先写下第一条知识记录。'
+                    : '可以把笔记写进这个分支，或者切回全部看看其他内容。'
+                }}
               </span>
-              <strong>{{ note.title }}</strong>
-              <p>{{ note.content }}</p>
-              <small v-if="note.tags.length > 0">{{ note.tags.join(' / ') }}</small>
-            </button>
-          </div>
+            </div>
+
+            <div v-else class="knowledge-note-items">
+              <button
+                v-for="note in activeKnowledgeNotes"
+                :key="note.id"
+                type="button"
+                class="knowledge-note-list-item"
+                :class="{ active: selectedKnowledgeNoteId === note.id }"
+                @click="selectKnowledgeNote(note)"
+              >
+                <span class="entry-time">
+                  {{ getDateGroupLabel(note.updatedAt) }} · {{ formatEntryTime(note.updatedAt) }}
+                </span>
+                <strong>{{ note.title }}</strong>
+                <p>{{ note.content }}</p>
+                <small>
+                  {{ note.branchId ? getBranchPathLabel(activeKnowledgeBaseBranches, note.branchId) : '未分组' }}
+                </small>
+                <small v-if="note.tags.length > 0">{{ note.tags.join(' / ') }}</small>
+              </button>
+            </div>
+          </template>
 
           <button
             v-if="activeKnowledgeBase"
@@ -3837,6 +4776,19 @@ onBeforeUnmount(() => {
               placeholder="写下知识点、操作步骤、理解、坑点或结论。"
               rows="10"
             />
+            <label class="branch-field">
+              <span>归属分支</span>
+              <select v-model="newKnowledgeNoteBranchValue" class="branch-select">
+                <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+                <option
+                  v-for="option in knowledgeBranchSelectOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
             <input
               v-model="newKnowledgeNoteSourceUrl"
               class="search-input compact-input"
@@ -3886,6 +4838,19 @@ onBeforeUnmount(() => {
               class="journal-input edit-input"
               rows="10"
             />
+            <label class="branch-field">
+              <span>归属分支</span>
+              <select v-model="editingKnowledgeNoteBranchValue" class="branch-select">
+                <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+                <option
+                  v-for="option in knowledgeBranchSelectOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
             <input
               v-model="editingKnowledgeNoteSourceUrl"
               class="search-input compact-input"
@@ -3930,6 +4895,9 @@ onBeforeUnmount(() => {
                 {{ getDateGroupLabel(selectedKnowledgeNote.updatedAt) }}
                 ·
                 {{ formatEntryTime(selectedKnowledgeNote.updatedAt) }}
+              </span>
+              <span>
+                {{ selectedKnowledgeNote.branchId ? getBranchPathLabel(activeKnowledgeBaseBranches, selectedKnowledgeNote.branchId) : '未分组' }}
               </span>
               <span v-if="selectedKnowledgeNote.sourceUrl">带来源链接</span>
             </div>
@@ -4155,10 +5123,22 @@ onBeforeUnmount(() => {
 
       <section class="lab-shell" aria-label="做记项目工作台">
         <section class="lab-records-pane" aria-labelledby="lab-records-title">
-          <div class="section-heading compact knowledge-pane-heading">
-            <h2 id="lab-records-title">
-              {{ activeLabProject ? activeLabProject.name : '选择项目' }}
-            </h2>
+          <div class="section-heading compact knowledge-pane-heading knowledge-pane-toolbar">
+            <div>
+              <h2 id="lab-records-title">
+                {{ activeLabProject ? activeLabProject.name : '选择项目' }}
+              </h2>
+              <small v-if="activeLabProject" class="branch-scope-label">
+                {{ describeBranchFilter(activeLabBranchFilterId, activeLabProjectBranches) }}
+                ·
+                {{ activeLabRecords.length }} 条
+              </small>
+            </div>
+            <div v-if="activeLabProject" class="knowledge-pane-actions">
+              <button class="ghost-action" type="button" @click="toggleLabBranchPanel">
+                {{ labBranchPanelOpen ? '收起分支' : '分支' }}
+              </button>
+            </div>
           </div>
 
           <div v-if="!activeLabProject" class="empty-state knowledge-empty-state">
@@ -4169,93 +5149,228 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div
-            v-else-if="activeOpenLabRecords.length === 0 && activeCompletedLabRecordItems.length === 0"
-            class="empty-state knowledge-empty-state"
-          >
-            <p>这个项目还没有记录。</p>
-            <span>点右下角按钮，先补一条操作或复盘。</span>
-          </div>
-
-          <div v-else class="knowledge-note-items">
-            <button
-              v-for="record in activeOpenLabRecords"
-              :key="record.id"
-              type="button"
-              class="lab-record-list-item"
-              :class="[
-                { active: selectedLabRecordId === record.id },
-                { 'has-card-todo': Boolean(getCardTodo('project', record.id)) },
-                `is-${record.type}`,
-              ]"
-              :data-todo-source="`project:${record.id}`"
-              @click="selectLabRecord(record)"
-            >
-              <div class="lab-record-list-header">
-                <span class="entry-time">
-                  {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
-                </span>
-                <div class="lab-record-list-badges">
-                  <span
-                    v-if="getCardTodo('project', record.id)"
-                    class="todo-mini-badge"
-                  >
-                    {{ getCardTodoIcon('project', record.id) }}
-                  </span>
-                  <span class="record-type-pill" :class="`is-${record.type}`">
-                    {{ getLabRecordTypeLabel(record.type) }}
-                  </span>
+          <template v-else>
+            <section v-if="labBranchPanelOpen" class="branch-panel" aria-label="做记分支管理">
+              <div class="branch-panel-header">
+                <div>
+                  <p class="eyebrow">分支筛选</p>
+                  <strong>
+                    {{ describeBranchFilter(activeLabBranchFilterId, activeLabProjectBranches) }}
+                  </strong>
                 </div>
-              </div>
-              <strong>{{ record.title }}</strong>
-              <p>{{ record.content }}</p>
-              <small v-if="record.tags.length > 0">{{ record.tags.join(' / ') }}</small>
-            </button>
-          </div>
-
-          <section
-            v-if="activeCompletedLabRecordItems.length > 0"
-            class="completed-todo-group"
-          >
-            <button
-              class="completed-todo-heading"
-              type="button"
-              @click="labCompletedOpen = !labCompletedOpen"
-            >
-              <span>{{ labCompletedOpen ? '▾' : '▸' }} 已完成</span>
-              <small>{{ activeCompletedLabRecordItems.length }}</small>
-            </button>
-            <div v-if="labCompletedOpen" class="completed-todo-actions">
-              <button class="delete-action" type="button" @click="clearLabDoneCardTodos">
-                清空已完成
-              </button>
-            </div>
-            <div v-if="labCompletedOpen" class="knowledge-note-items">
-              <button
-                v-for="item in activeCompletedLabRecordItems"
-                :key="item.todo.id"
-                type="button"
-                class="lab-record-list-item is-todo-done"
-                :class="`is-${item.record.type}`"
-                :data-todo-source="`project:${item.record.id}`"
-                :data-todo-target="item.todo.id"
-                @click="selectLabRecord(item.record)"
-              >
-                <div class="lab-record-list-header">
-                  <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
+                <div class="branch-panel-actions">
+                  <button class="ghost-action" type="button" @click="createLabBranch(null)">
+                    新建根分支
+                  </button>
                   <button
-                    class="todo-card-toggle is-done"
+                    class="ghost-action"
                     type="button"
-                    @click.stop="toggleTodoStatus(item.todo)"
+                    :disabled="!selectedLabBranch"
+                    @click="createLabBranch(selectedLabBranch?.id ?? null)"
                   >
-                    {{ getTodoStatusIcon(item.todo) }}
+                    子分支
                   </button>
                 </div>
-                <strong>{{ item.record.title }}</strong>
-                <p>{{ item.record.content }}</p>
+              </div>
+
+              <div class="branch-filter-list">
+                <button
+                  type="button"
+                  class="branch-filter-item"
+                  :class="{ active: activeLabBranchFilterId === 'all' }"
+                  @click="setLabBranchFilter('all')"
+                >
+                  <span>全部</span>
+                  <small>{{ activeLabProjectRecords.length }}</small>
+                </button>
+                <button
+                  type="button"
+                  class="branch-filter-item"
+                  :class="{ active: activeLabBranchFilterId === 'ungrouped' }"
+                  @click="setLabBranchFilter('ungrouped')"
+                >
+                  <span>未分组</span>
+                  <small>
+                    {{
+                      countItemsInBranchScope(
+                        activeLabProjectRecords.map((record) => record.branchId),
+                        activeLabBranches,
+                        'ungrouped',
+                      )
+                    }}
+                  </small>
+                </button>
+                <button
+                  v-for="item in labBranchTreeItems"
+                  :key="item.branch.id"
+                  type="button"
+                  class="branch-filter-item"
+                  :class="{ active: activeLabBranchFilterId === item.branch.id }"
+                  :style="{ paddingLeft: `${12 + (item.depth - 1) * 18}px` }"
+                  @click="setLabBranchFilter(item.branch.id)"
+                >
+                  <span>{{ item.branch.name }}</span>
+                  <small>{{ item.itemCount }}</small>
+                </button>
+              </div>
+
+              <div v-if="selectedLabBranch" class="branch-selection-card">
+                <div>
+                  <strong>{{ selectedLabBranch.name }}</strong>
+                  <small>{{ getBranchPathLabel(activeLabProjectBranches, selectedLabBranch.id) }}</small>
+                </div>
+                <div class="branch-selection-actions">
+                  <button class="ghost-action" type="button" @click="renameSelectedLabBranch">
+                    重命名
+                  </button>
+                  <button class="ghost-action" type="button" @click="moveSelectedLabBranch">
+                    移动
+                  </button>
+                  <button class="ghost-action" type="button" @click="archiveSelectedLabBranch">
+                    归档
+                  </button>
+                  <button class="delete-action" type="button" @click="deleteSelectedLabBranch">
+                    删除
+                  </button>
+                </div>
+              </div>
+
+              <section
+                v-if="archivedLabBranches.length > 0"
+                class="branch-archived-panel"
+              >
+                <button
+                  class="completed-todo-heading branch-archived-toggle"
+                  type="button"
+                  @click="labArchivedBranchesOpen = !labArchivedBranchesOpen"
+                >
+                  <span>{{ labArchivedBranchesOpen ? '▾' : '▸' }} 已归档</span>
+                  <small>{{ archivedLabBranches.length }}</small>
+                </button>
+                <div v-if="labArchivedBranchesOpen" class="branch-archived-list">
+                  <div
+                    v-for="branch in archivedLabBranches"
+                    :key="branch.id"
+                    class="branch-archived-item"
+                  >
+                    <div>
+                      <strong>{{ branch.name }}</strong>
+                      <small>{{ getBranchPathLabel(activeLabProjectBranches, branch.id) }}</small>
+                    </div>
+                    <button class="ghost-action" type="button" @click="restoreLabBranch(branch)">
+                      恢复
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <div
+              v-if="activeOpenLabRecords.length === 0 && activeCompletedLabRecordItems.length === 0"
+              class="empty-state knowledge-empty-state"
+            >
+              <p>
+                {{
+                  activeLabBranchFilterId === 'all'
+                    ? '这个项目还没有记录。'
+                    : '这个分支范围里还没有记录。'
+                }}
+              </p>
+              <span>
+                {{
+                  activeLabBranchFilterId === 'all'
+                    ? '点右下角按钮，先补一条操作或复盘。'
+                    : '可以把记录写进这个分支，或者切回全部看看其他内容。'
+                }}
+              </span>
+            </div>
+
+            <div v-else class="knowledge-note-items">
+              <button
+                v-for="record in activeOpenLabRecords"
+                :key="record.id"
+                type="button"
+                class="lab-record-list-item"
+                :class="[
+                  { active: selectedLabRecordId === record.id },
+                  { 'has-card-todo': Boolean(getCardTodo('project', record.id)) },
+                  `is-${record.type}`,
+                ]"
+                :data-todo-source="`project:${record.id}`"
+                @click="selectLabRecord(record)"
+              >
+                <div class="lab-record-list-header">
+                  <span class="entry-time">
+                    {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
+                  </span>
+                  <div class="lab-record-list-badges">
+                    <span
+                      v-if="getCardTodo('project', record.id)"
+                      class="todo-mini-badge"
+                    >
+                      {{ getCardTodoIcon('project', record.id) }}
+                    </span>
+                    <span class="record-type-pill" :class="`is-${record.type}`">
+                      {{ getLabRecordTypeLabel(record.type) }}
+                    </span>
+                  </div>
+                </div>
+                <strong>{{ record.title }}</strong>
+                <p>{{ record.content }}</p>
+                <small>
+                  {{ record.branchId ? getBranchPathLabel(activeLabProjectBranches, record.branchId) : '未分组' }}
+                </small>
+                <small v-if="record.tags.length > 0">{{ record.tags.join(' / ') }}</small>
               </button>
             </div>
-          </section>
+
+            <section
+              v-if="activeCompletedLabRecordItems.length > 0"
+              class="completed-todo-group"
+            >
+              <button
+                class="completed-todo-heading"
+                type="button"
+                @click="labCompletedOpen = !labCompletedOpen"
+              >
+                <span>{{ labCompletedOpen ? '▾' : '▸' }} 已完成</span>
+                <small>{{ activeCompletedLabRecordItems.length }}</small>
+              </button>
+              <div v-if="labCompletedOpen" class="completed-todo-actions">
+                <button class="delete-action" type="button" @click="clearLabDoneCardTodos">
+                  清空已完成
+                </button>
+              </div>
+              <div v-if="labCompletedOpen" class="knowledge-note-items">
+                <button
+                  v-for="item in activeCompletedLabRecordItems"
+                  :key="item.todo.id"
+                  type="button"
+                  class="lab-record-list-item is-todo-done"
+                  :class="`is-${item.record.type}`"
+                  :data-todo-source="`project:${item.record.id}`"
+                  :data-todo-target="item.todo.id"
+                  @click="selectLabRecord(item.record)"
+                >
+                  <div class="lab-record-list-header">
+                    <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
+                    <button
+                      class="todo-card-toggle is-done"
+                      type="button"
+                      @click.stop="toggleTodoStatus(item.todo)"
+                    >
+                      {{ getTodoStatusIcon(item.todo) }}
+                    </button>
+                  </div>
+                  <strong>{{ item.record.title }}</strong>
+                  <p>{{ item.record.content }}</p>
+                  <small>
+                    {{ item.record.branchId ? getBranchPathLabel(activeLabProjectBranches, item.record.branchId) : '未分组' }}
+                  </small>
+                </button>
+              </div>
+            </section>
+          </template>
 
           <button
             v-if="activeLabProject"
@@ -4316,6 +5431,19 @@ onBeforeUnmount(() => {
               placeholder="写下这次做了什么，或者这次复盘看到了什么。"
               rows="10"
             />
+            <label class="branch-field">
+              <span>归属分支</span>
+              <select v-model="newLabRecordBranchValue" class="branch-select">
+                <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+                <option
+                  v-for="option in labBranchSelectOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
             <input
               v-model="newLabRecordTags"
               class="search-input compact-input"
@@ -4376,6 +5504,19 @@ onBeforeUnmount(() => {
               class="journal-input edit-input"
               rows="10"
             />
+            <label class="branch-field">
+              <span>归属分支</span>
+              <select v-model="editingLabRecordBranchValue" class="branch-select">
+                <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+                <option
+                  v-for="option in labBranchSelectOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
             <input
               v-model="editingLabRecordTags"
               class="search-input compact-input"
@@ -4413,6 +5554,9 @@ onBeforeUnmount(() => {
                 {{ getDateGroupLabel(selectedLabRecord.updatedAt) }}
                 ·
                 {{ formatEntryTime(selectedLabRecord.updatedAt) }}
+              </span>
+              <span>
+                {{ selectedLabRecord.branchId ? getBranchPathLabel(activeLabProjectBranches, selectedLabRecord.branchId) : '未分组' }}
               </span>
               <span class="record-type-pill" :class="`is-${selectedLabRecord.type}`">
                 {{ getLabRecordTypeLabel(selectedLabRecord.type) }}

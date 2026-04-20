@@ -13,6 +13,7 @@ export interface LabProject {
 export interface LabRecord {
   id: string;
   projectId: string;
+  branchId: string | null;
   title: string;
   content: string;
   type: LabRecordType;

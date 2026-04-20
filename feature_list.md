@@ -164,7 +164,7 @@ Codex 会优先读取这些任务卡：
 | `TASK-019` | `planned` | 项目实验库里的实验进度记录：按实验主题持续记录目标、过程、观察、结果和下一步 | `cd journal-agent && npm run build` |
 | `TASK-020` | `done` | 做记 Park 项目记录：按项目聚合操作与复盘，并用颜色类型标记区分记录 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-025` | `planned` | 做记仓库目标卡片：为每个仓库新增目标卡片来存放目标清单，并在完成时提供可交互动效 | `cd journal-agent && npm run build && npx cap sync ios` |
-| `TASK-026` | `planned` | 笔记与做记多分支层级：知识库和做记项目内部支持最多 4 层分支树，用于组织主题、章节、模块或阶段 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-026` | `done` | 笔记与做记多分支层级：知识库和做记项目内部支持最多 4 层分支树，用于组织主题、章节、模块或阶段 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-027` | `done` | 系统提醒与句子级定时提醒：为某条记录或记录中的某句话设置系统定时提醒，点击后回到对应位置 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-028` | `done` | 日记未来日期编辑：心记可以指定记录归属日期，并在未来任意日期下新增或编辑日记 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-029` | `done` | Todo 句子锚点底层服务：为句子级待办提供创建、解析和模糊定位能力 | `cd journal-agent && npm run build` |
@@ -586,7 +586,7 @@ Codex 会优先读取这些任务卡：
 
 ### F030：笔记与做记多分支层级
 
-状态：`planned`
+状态：`done`
 
 在知识库和做记项目内部加入可管理的分支树，让内容不只停留在“库 / 项目 -> 记录”两层，而是可以按主题、章节、模块或阶段继续细分。产品层面最多支持 4 层，避免变成难维护的无限文件夹。
 
@@ -600,6 +600,11 @@ Codex 会优先读取这些任务卡：
 - 分支支持新增、重命名、移动、归档或删除前确认；删除分支时不能静默删除已有记录。
 - 移动端使用折叠树或二级抽屉管理分支，避免常驻挤占主内容区。
 - Agent 新增或编辑笔记、做记时可以读取分支上下文；目标分支不明确时先追问，不要猜。
+
+验证结果：
+
+- `npm run build` 通过。
+- `npx cap sync ios` 通过。
 
 ### F031：系统提醒与句子级定时提醒
 
