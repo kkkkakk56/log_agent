@@ -170,6 +170,7 @@ Codex 会优先读取这些任务卡：
 | `TASK-029` | `done` | Todo 句子锚点底层服务：为句子级待办提供创建、解析和模糊定位能力 | `cd journal-agent && npm run build` |
 | `TASK-030` | `done` | Todo 基础能力：心记和做记支持卡片级、句子级待办，完成后折叠到已完成分组 | `cd journal-agent && npm run build` |
 | `TASK-031` | `done` | 全局我的待办视图：跨心记和做记汇总打开与已完成的待办，并可跳回来源 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-032` | `done` | Agent 浮钮位置可调：用户可以拖动 Agent 浮钮到屏幕任意安全位置，并在下次打开时保持该位置 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-021` | `planned` | 多类型资料检索与 Agent 读取：让搜索和 Agent 能理解日志、知识库、实验、项目等不同记录来源 | `cd journal-agent && npm run build && npm run test:agent-api` |
 | `TASK-023` | `planned` | 共同 Workspace 与权限控制：支持邀请他人加入共享 workspace，并只允许有权限的成员操作其中内容 | `cd journal-agent && npm run build` |
 | `TASK-024` | `done` | Agent 三记写入工具：允许 Agent 在受限协议下新增或编辑心记、笔记和做记记录，但不提供删除能力 | `cd journal-agent && npm run build && npm run test:agent-api` |
@@ -691,6 +692,26 @@ Codex 会优先读取这些任务卡：
 - `npm run build` 通过。
 - `npx cap sync ios` 通过。
 
+### F034：Agent 浮钮位置可调
+
+状态：`done`
+
+Agent 浮动入口可以被用户拖到屏幕中的任意安全位置，并保存该位置，避免遮挡记录、待办或提醒操作。
+
+验收标准：
+
+- 用户可以按住并拖动 Agent 浮钮调整位置。
+- 短按 Agent 浮钮仍然打开或关闭 Agent 面板，拖动不会误触打开。
+- 浮钮位置被限制在屏幕安全范围内，不能拖出可视区域。
+- 浮钮坐标保存到 `localStorage`，刷新或重启 App 后位置保持不变。
+- 屏幕尺寸变化后，浮钮会自动回到可视范围内。
+- Agent 面板会根据浮钮所在位置自动向上或向下展开，减少遮挡。
+
+验证结果：
+
+- `npm run build` 通过。
+- `npx cap sync ios` 通过。
+
 ### F025：多类型资料检索与 Agent 读取
 
 状态：`planned`
@@ -745,6 +766,6 @@ Codex 会优先读取这些任务卡：
 
 ## 下一步建议
 
-知识库抽屉导航、做记 Park 项目记录、Agent 代写三记、系统提醒、日记未来日期编辑和 Todo 标记都已经可用。下一步可以回到 `TASK-005 / F005：草稿自动保存`，或者继续补 `F023：实验进度记录`。
+知识库抽屉导航、做记 Park 项目记录、Agent 代写三记、系统提醒、日记未来日期编辑、Todo 标记和 Agent 浮钮位置可调都已经可用。下一步可以回到 `TASK-005 / F005：草稿自动保存`，或者继续补 `F023：实验进度记录`。
 
 计划区仍然作为后续 Park 保留在路线图里。

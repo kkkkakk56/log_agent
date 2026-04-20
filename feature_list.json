@@ -652,6 +652,27 @@
       "notes": "已完成。提醒筛选会识别 Todo 自带 reminderId 或同一来源记录上的活跃提醒；跳转到句子级 Todo 时使用锚点渲染高亮。验证通过：npm run build，npx cap sync ios。"
     },
     {
+      "id": "TASK-032",
+      "featureId": "F034",
+      "category": "feature",
+      "description": "Agent 浮钮位置可调：用户可以拖动 Agent 浮钮到屏幕任意安全位置，并在下次打开时保持该位置",
+      "status": "done",
+      "priority": 17,
+      "dependsOn": [
+        "F014"
+      ],
+      "steps": [
+        "Agent 浮钮支持拖动，不影响短按打开或关闭 Agent 面板",
+        "拖动位置限制在屏幕安全范围内，避免浮钮被拖出可视区域",
+        "浮钮位置保存到本地存储，刷新或重启 App 后继续沿用",
+        "屏幕尺寸变化时自动把浮钮重新夹回可视区域",
+        "Agent 面板根据浮钮位置自动向上或向下展开，减少遮挡和溢出"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。使用 journal-agent.agent.fab-position.v1 保存浮钮坐标；拖动超过阈值才移动，避免和点击打开 Agent 冲突。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
       "id": "TASK-021",
       "featureId": "F025",
       "category": "feature",
@@ -1360,6 +1381,30 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。受 WebView 能力限制，第一版不改写 iOS 系统选中文字菜单，采用“选中文字后点击 App 内待办按钮”的交互；其余数据结构、折叠已完成、完成备注和全局待办视图均已落地。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F034",
+      "title": "Agent 浮钮位置可调",
+      "status": "done",
+      "priority": 17,
+      "phase": "M2-local-journal",
+      "summary": "Agent 浮动入口可以被用户拖到屏幕中的任意安全位置，并保存该位置，避免遮挡记录、待办或提醒操作。",
+      "dependsOn": [
+        "F014"
+      ],
+      "acceptanceCriteria": [
+        "用户可以按住并拖动 Agent 浮钮调整位置。",
+        "短按 Agent 浮钮仍然打开或关闭 Agent 面板，拖动不会误触打开。",
+        "浮钮位置被限制在屏幕安全范围内，不能拖出可视区域。",
+        "浮钮坐标保存到 localStorage，刷新或重启 App 后位置保持不变。",
+        "屏幕尺寸变化后，浮钮会自动回到可视范围内。",
+        "Agent 面板会根据浮钮所在位置自动向上或向下展开，减少遮挡。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。位置使用 journal-agent.agent.fab-position.v1 持久化；拖动阈值用于区分点击和移动。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "F025",

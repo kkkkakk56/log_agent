@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  type CSSProperties,
+} from 'vue';
 import type { CalendarDay } from './utils/date';
 import type { JournalEntry } from './types/journal';
 import type { KnowledgeBase, KnowledgeNote } from './types/knowledge';
@@ -26,7 +33,6 @@ import {
   type AgentConversation,
 } from './storage/agentConversationStore';
 import {
-  cancelReminder,
   cancelRemindersForTarget,
   createReminder,
   getActiveReminders,
@@ -146,6 +152,11 @@ const LAB_RECORD_TYPE_META: Record<LabRecordType, { label: string }> = {
   operation: { label: '操作' },
   review: { label: '复盘' },
 };
+const AGENT_POSITION_STORAGE_KEY = 'journal-agent.agent.fab-position.v1';
+const AGENT_FAB_SAFE_MARGIN = 16;
+const AGENT_FAB_DEFAULT_WIDTH = 112;
+const AGENT_FAB_DEFAULT_HEIGHT = 52;
+const AGENT_DRAG_THRESHOLD = 6;
 
 const labRecordTypeOptions: Array<{
   value: LabRecordType;
@@ -238,6 +249,22 @@ const searchQuery = ref('');
 const calendarMonth = ref(startOfMonth(new Date()));
 const selectedDateKey = ref(getLocalDateKey(new Date()));
 const agentPanelOpen = ref(false);
+const agentFabRef = ref<HTMLElement | null>(null);
+const agentPositionReady = ref(false);
+const agentViewportSize = ref({
+  width: typeof window === 'undefined' ? 0 : window.innerWidth,
+  height: typeof window === 'undefined' ? 0 : window.innerHeight,
+});
+const agentFabPosition = ref({ x: 0, y: 0 });
+const agentDragState = ref<{
+  pointerId: number;
+  startX: number;
+  startY: number;
+  initialX: number;
+  initialY: number;
+  moved: boolean;
+} | null>(null);
+const agentSuppressClick = ref(false);
 const agentInput = ref('');
 const agentIsThinking = ref(false);
 const ragIndexVersion = ref(0);
@@ -508,6 +535,18 @@ const agentRecordContext = computed(() => {
 const canSendAgentMessage = computed(
   () => agentInput.value.trim().length > 0 && !agentIsThinking.value,
 );
+const agentLayerStyle = computed<CSSProperties>(() => ({
+  left: `${agentFabPosition.value.x}px`,
+  top: `${agentFabPosition.value.y}px`,
+  visibility: agentPositionReady.value ? 'visible' : 'hidden',
+}));
+const agentLayerClasses = computed(() => ({
+  'opens-up': agentFabPosition.value.y > agentViewportSize.value.height * 0.48,
+  'opens-down': agentFabPosition.value.y <= agentViewportSize.value.height * 0.48,
+  'align-right': agentFabPosition.value.x > agentViewportSize.value.width * 0.5,
+  'align-left': agentFabPosition.value.x <= agentViewportSize.value.width * 0.5,
+  'is-dragging': Boolean(agentDragState.value?.moved),
+}));
 const activeReminders = computed(() =>
   reminders.value.filter(
     (reminder) =>
@@ -515,7 +554,6 @@ const activeReminders = computed(() =>
       new Date(reminder.scheduledAt).getTime() > Date.now(),
   ),
 );
-const visibleReminders = computed(() => activeReminders.value.slice(0, 4));
 const todoSourceItems = computed(() =>
   todos.value.map((todo) => resolveTodoSource(todo)).filter((item) => !item.isMissing),
 );
@@ -1421,21 +1459,6 @@ function getDefaultReminderDateTime(): string {
   return toDateTimeLocalInputValue(new Date(Date.now() + 60 * 60_000));
 }
 
-function formatReminderDateTime(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
 function getTargetTypeLabel(targetType: ReminderTargetType): string {
   if (targetType === 'journal-entry') {
     return '心记';
@@ -1519,72 +1542,6 @@ function closeReminderComposer() {
   reminderError.value = '';
 }
 
-function resolveReminderTarget(reminder: RecordReminder): ReminderTargetDraft | null {
-  if (reminder.targetType === 'journal-entry') {
-    const entry = entries.value.find((item) => item.id === reminder.targetId);
-
-    if (!entry) {
-      return null;
-    }
-
-    return {
-      type: 'journal-entry',
-      id: entry.id,
-      parentId: null,
-      title: entry.title || '未命名心记',
-      content: entry.content,
-    };
-  }
-
-  if (reminder.targetType === 'knowledge-note') {
-    const note = knowledgeNotes.value.find((item) => item.id === reminder.targetId);
-
-    if (!note) {
-      return null;
-    }
-
-    return {
-      type: 'knowledge-note',
-      id: note.id,
-      parentId: note.baseId,
-      title: note.title || '未命名笔记',
-      content: note.content,
-    };
-  }
-
-  const record = labRecords.value.find((item) => item.id === reminder.targetId);
-
-  if (!record) {
-    return null;
-  }
-
-  return {
-    type: 'lab-record',
-    id: record.id,
-    parentId: record.projectId,
-    title: record.title || '未命名做记',
-    content: record.content,
-  };
-}
-
-function startReminderEditing(reminder: RecordReminder) {
-  const target = resolveReminderTarget(reminder);
-
-  if (!target) {
-    reminderStatusMessage.value = '这条提醒对应的记录已经不可用。';
-    return;
-  }
-
-  reminderTarget.value = target;
-  reminderEditingId.value = reminder.id;
-  reminderScheduledAt.value = toDateTimeLocalInputValue(new Date(reminder.scheduledAt));
-  reminderTitle.value = reminder.reminderTitle;
-  reminderQuote.value = reminder.quote;
-  reminderError.value = '';
-  reminderStatusMessage.value = '正在修改已有提醒。';
-  reminderComposerOpen.value = true;
-}
-
 function scheduleSavedReminder(reminder: RecordReminder) {
   void scheduleReminderNotification(reminder).then((scheduleResult) => {
     reminderStatusMessage.value = scheduleResult.ok
@@ -1646,18 +1603,6 @@ function saveReminder() {
   closeReminderComposer();
   reminderIsSaving.value = false;
   scheduleSavedReminder(reminder);
-}
-
-function cancelReminderFromList(reminder: RecordReminder) {
-  const canceledReminder = cancelReminder(reminder.id);
-
-  if (!canceledReminder) {
-    return;
-  }
-
-  reminderStatusMessage.value = '提醒已取消。';
-  refreshReminders();
-  void cancelReminderNotification(canceledReminder.notificationId);
 }
 
 function cancelTargetReminders(
@@ -2546,8 +2491,181 @@ function jumpToToday() {
   draftEntryDate.value = selectedDateKey.value;
 }
 
+function readSavedAgentPosition(): { x: number; y: number } | null {
+  try {
+    const rawPosition = localStorage.getItem(AGENT_POSITION_STORAGE_KEY);
+
+    if (!rawPosition) {
+      return null;
+    }
+
+    const parsedPosition: unknown = JSON.parse(rawPosition);
+
+    if (
+      typeof parsedPosition !== 'object' ||
+      parsedPosition === null ||
+      typeof (parsedPosition as { x?: unknown }).x !== 'number' ||
+      typeof (parsedPosition as { y?: unknown }).y !== 'number'
+    ) {
+      return null;
+    }
+
+    return {
+      x: (parsedPosition as { x: number }).x,
+      y: (parsedPosition as { y: number }).y,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveAgentPosition() {
+  try {
+    localStorage.setItem(
+      AGENT_POSITION_STORAGE_KEY,
+      JSON.stringify(agentFabPosition.value),
+    );
+  } catch {
+    // Position persistence is nice-to-have; dragging should still work.
+  }
+}
+
+function getAgentFabSize(): { width: number; height: number } {
+  const fabRect = agentFabRef.value?.getBoundingClientRect();
+
+  return {
+    width: fabRect?.width ?? AGENT_FAB_DEFAULT_WIDTH,
+    height: fabRect?.height ?? AGENT_FAB_DEFAULT_HEIGHT,
+  };
+}
+
+function clampAgentPosition(position: { x: number; y: number }): { x: number; y: number } {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const fabSize = getAgentFabSize();
+  const maxX = Math.max(
+    AGENT_FAB_SAFE_MARGIN,
+    viewportWidth - fabSize.width - AGENT_FAB_SAFE_MARGIN,
+  );
+  const maxY = Math.max(
+    AGENT_FAB_SAFE_MARGIN,
+    viewportHeight - fabSize.height - AGENT_FAB_SAFE_MARGIN,
+  );
+
+  return {
+    x: Math.min(Math.max(position.x, AGENT_FAB_SAFE_MARGIN), maxX),
+    y: Math.min(Math.max(position.y, AGENT_FAB_SAFE_MARGIN), maxY),
+  };
+}
+
+function updateAgentViewportSize() {
+  agentViewportSize.value = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
+}
+
+function initializeAgentFabPosition() {
+  updateAgentViewportSize();
+
+  const fabSize = getAgentFabSize();
+  const savedPosition = readSavedAgentPosition();
+  const defaultPosition = {
+    x: window.innerWidth - fabSize.width - 20,
+    y: window.innerHeight - fabSize.height - 20,
+  };
+
+  agentFabPosition.value = clampAgentPosition(savedPosition ?? defaultPosition);
+  agentPositionReady.value = true;
+  saveAgentPosition();
+}
+
+function handleAgentViewportResize() {
+  updateAgentViewportSize();
+  agentFabPosition.value = clampAgentPosition(agentFabPosition.value);
+  saveAgentPosition();
+}
+
+function handleAgentFabPointerDown(event: PointerEvent) {
+  if (event.button !== 0) {
+    return;
+  }
+
+  const target = event.currentTarget;
+
+  if (target instanceof HTMLElement) {
+    target.setPointerCapture(event.pointerId);
+  }
+
+  agentDragState.value = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    initialX: agentFabPosition.value.x,
+    initialY: agentFabPosition.value.y,
+    moved: false,
+  };
+}
+
+function handleAgentFabPointerMove(event: PointerEvent) {
+  const dragState = agentDragState.value;
+
+  if (!dragState || dragState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - dragState.startX;
+  const deltaY = event.clientY - dragState.startY;
+  const hasMoved =
+    Math.abs(deltaX) > AGENT_DRAG_THRESHOLD ||
+    Math.abs(deltaY) > AGENT_DRAG_THRESHOLD;
+
+  if (!dragState.moved && !hasMoved) {
+    return;
+  }
+
+  event.preventDefault();
+  dragState.moved = true;
+  agentFabPosition.value = clampAgentPosition({
+    x: dragState.initialX + deltaX,
+    y: dragState.initialY + deltaY,
+  });
+}
+
+function finishAgentFabDrag(event: PointerEvent) {
+  const dragState = agentDragState.value;
+
+  if (!dragState || dragState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  const target = event.currentTarget;
+
+  if (target instanceof HTMLElement) {
+    target.releasePointerCapture(event.pointerId);
+  }
+
+  if (dragState.moved) {
+    agentSuppressClick.value = true;
+    saveAgentPosition();
+    window.setTimeout(() => {
+      agentSuppressClick.value = false;
+    }, 120);
+  }
+
+  agentDragState.value = null;
+}
+
 function toggleAgentPanel() {
   agentPanelOpen.value = !agentPanelOpen.value;
+}
+
+function handleAgentFabClick() {
+  if (agentSuppressClick.value) {
+    return;
+  }
+
+  toggleAgentPanel();
 }
 
 function closeAgentPanel() {
@@ -2665,6 +2783,8 @@ async function submitAgentMessage() {
 
 onMounted(() => {
   document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
+  window.addEventListener('resize', handleAgentViewportResize);
+  void nextTick(initializeAgentFabPosition);
   void listenForReminderNotificationActions((action) => {
     focusReminderById(action.reminderId);
   });
@@ -2672,6 +2792,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', captureTodoSelectionFromWindow);
+  window.removeEventListener('resize', handleAgentViewportResize);
   clearTodoCompletionTimer();
 });
 </script>
@@ -2753,46 +2874,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </template>
-      </div>
-    </section>
-
-    <section
-      v-if="activeReminders.length > 0 || reminderStatusMessage"
-      class="reminder-dock"
-      aria-label="系统提醒"
-    >
-      <div class="section-heading compact">
-        <div>
-          <p class="eyebrow">提醒</p>
-          <h2>系统定时提醒</h2>
-        </div>
-        <span class="counter">{{ activeReminders.length }} 条</span>
-      </div>
-
-      <p v-if="reminderStatusMessage" class="reminder-message">
-        {{ reminderStatusMessage }}
-      </p>
-
-      <div v-if="visibleReminders.length > 0" class="reminder-list">
-        <article
-          v-for="reminder in visibleReminders"
-          :key="reminder.id"
-          class="reminder-item"
-        >
-          <button type="button" class="reminder-item-main" @click="focusReminderTarget(reminder)">
-            <span>{{ getTargetTypeLabel(reminder.targetType) }} · {{ formatReminderDateTime(reminder.scheduledAt) }}</span>
-            <strong>{{ reminder.reminderTitle }}</strong>
-            <small>{{ reminder.quote || reminder.targetTitle }}</small>
-          </button>
-          <div class="reminder-item-actions">
-            <button class="ghost-action" type="button" @click="startReminderEditing(reminder)">
-              修改
-            </button>
-            <button class="delete-action" type="button" @click="cancelReminderFromList(reminder)">
-              取消
-            </button>
-          </div>
-        </article>
       </div>
     </section>
 
@@ -4658,13 +4739,23 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="agent-layer">
+    <div
+      class="agent-layer"
+      :class="agentLayerClasses"
+      :style="agentLayerStyle"
+    >
       <button
+        ref="agentFabRef"
         class="agent-fab"
         type="button"
         :aria-expanded="agentPanelOpen"
         aria-controls="agent-panel"
-        @click="toggleAgentPanel"
+        aria-label="拖动调整 Agent 浮钮位置，点击打开 Agent"
+        @pointerdown="handleAgentFabPointerDown"
+        @pointermove="handleAgentFabPointerMove"
+        @pointerup="finishAgentFabDrag"
+        @pointercancel="finishAgentFabDrag"
+        @click="handleAgentFabClick"
       >
         <span class="anime-avatar" aria-hidden="true">
           <span class="avatar-hair"></span>
@@ -4674,7 +4765,6 @@ onBeforeUnmount(() => {
             <b></b>
           </span>
         </span>
-        <span class="agent-fab-copy">Agent</span>
       </button>
 
       <section
