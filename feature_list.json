@@ -559,6 +559,29 @@
       "notes": "已完成。使用 @capacitor/local-notifications 调度系统本地通知，提醒数据本地保存记录类型、记录 id、句子摘录和锚点；通知点击后回到对应 Park 和记录，并尽量高亮目标句子。验证通过：npm run build，npx cap sync ios。"
     },
     {
+      "id": "TASK-028",
+      "featureId": "F032",
+      "category": "feature",
+      "description": "日记未来日期编辑：心记可以指定记录归属日期，并在未来任意日期下新增或编辑日记",
+      "status": "done",
+      "priority": 13,
+      "dependsOn": [
+        "F002",
+        "F003"
+      ],
+      "steps": [
+        "为心记增加独立的 entryDate / 记录日期字段，和 createdAt、updatedAt 分开保存",
+        "旧心记记录读取时自动用 createdAt 推导 entryDate，避免已有数据丢失",
+        "新增心记时允许选择过去、今天或未来任意日期作为归属日期",
+        "日历选中未来日期后可以直接跳转到该日期写记录",
+        "编辑已有心记时可以修改归属日期，保存后时间线和日历标记同步移动",
+        "时间线、搜索和日历统计都按 entryDate 归档；创建时间只作为元信息展示"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。第一版仅支持心记 Park，不扩展到笔记或做记；记录日期 entryDate 用 YYYY-MM-DD 保存，旧数据读取时自动补齐。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
       "id": "TASK-021",
       "featureId": "F025",
       "category": "feature",
@@ -1206,6 +1229,32 @@
         "真机创建提醒、收到通知、点击回到记录位置的手动验证"
       ],
       "notes": "已完成。系统通知负责在指定时间唤起提醒；精确到某句话通过本地保存 quote、字符偏移或文本锚点实现，打开记录详情页后由 App 滚动上下文并高亮。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F032",
+      "title": "日记未来日期编辑",
+      "status": "done",
+      "priority": 13,
+      "phase": "M2-local-journal",
+      "summary": "心记支持选择过去、今天或未来任意日期作为记录归属日期，并能在编辑时调整归属日期；时间线和日历按记录日期归档，而不是按真实创建时间混排。",
+      "dependsOn": [
+        "F002",
+        "F003"
+      ],
+      "acceptanceCriteria": [
+        "心记记录有独立的 entryDate / 记录日期字段，和 createdAt、updatedAt 分开保存。",
+        "已有旧心记没有 entryDate 时，读取时自动用 createdAt 推导记录日期，不丢失历史记录。",
+        "用户新增心记时可以选择过去、今天或未来任意日期。",
+        "用户在日历里选中未来日期后，可以直接把新心记写到那一天。",
+        "用户编辑已有心记时可以修改归属日期；保存后该心记会移动到新的时间线分组和日历日期。",
+        "日历标记、选中日期列表、时间线分组和搜索结果都能展示正确的记录日期。",
+        "第一版仅作用于心记 Park，不改变笔记和做记的数据结构。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。entryDate 使用本地 YYYY-MM-DD 日期键，createdAt 继续表示真实创建时间，updatedAt 继续表示真实修改时间。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "F025",

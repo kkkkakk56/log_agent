@@ -1,7 +1,9 @@
-import type { JournalEntry, JournalSyncStatus } from '../types/journal';
+import type { JournalEntry, JournalMood, JournalSyncStatus } from '../types/journal';
 
 const STORAGE_KEY = 'journal-agent.entries.v1';
 const MAX_TITLE_LENGTH = 18;
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const JOURNAL_MOODS: readonly JournalMood[] = ['great', 'calm', 'tired', 'low'];
 const SYNC_STATUSES: readonly JournalSyncStatus[] = [
   'local',
   'pending',
@@ -18,16 +20,58 @@ const isSyncStatus = (value: unknown): value is JournalSyncStatus =>
   typeof value === 'string' &&
   SYNC_STATUSES.includes(value as JournalSyncStatus);
 
-const isJournalEntry = (value: unknown): value is JournalEntry =>
-  isRecord(value) &&
-  typeof value.id === 'string' &&
-  typeof value.title === 'string' &&
-  typeof value.content === 'string' &&
-  typeof value.createdAt === 'string' &&
-  typeof value.updatedAt === 'string' &&
-  (typeof value.deletedAt === 'string' || value.deletedAt === null) &&
-  isStringArray(value.tags) &&
-  isSyncStatus(value.syncStatus);
+const isJournalMood = (value: unknown): value is JournalMood =>
+  typeof value === 'string' && JOURNAL_MOODS.includes(value as JournalMood);
+
+const getLocalDateKey = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+};
+
+const isDateKey = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !DATE_KEY_PATTERN.test(value)) {
+    return false;
+  }
+
+  return !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
+};
+
+const createEntryDateFromIso = (iso: string): string =>
+  getLocalDateKey(new Date(Number.isNaN(new Date(iso).getTime()) ? Date.now() : iso));
+
+const normalizeJournalEntry = (value: unknown): JournalEntry | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.content !== 'string' ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
+    !isStringArray(value.tags) ||
+    !isSyncStatus(value.syncStatus)
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    title: value.title,
+    content: value.content,
+    entryDate: isDateKey(value.entryDate)
+      ? value.entryDate
+      : createEntryDateFromIso(value.createdAt),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    deletedAt: value.deletedAt,
+    tags: value.tags,
+    syncStatus: value.syncStatus,
+    mood: isJournalMood(value.mood) ? value.mood : null,
+  };
+};
 
 const readEntries = (): JournalEntry[] => {
   try {
@@ -43,7 +87,9 @@ const readEntries = (): JournalEntry[] => {
       return [];
     }
 
-    return parsedEntries.filter(isJournalEntry);
+    return parsedEntries
+      .map(normalizeJournalEntry)
+      .filter((entry): entry is JournalEntry => entry !== null);
   } catch {
     return [];
   }
@@ -80,25 +126,27 @@ const createTitle = (content: string, title = ''): string => {
   return titleSource.slice(0, MAX_TITLE_LENGTH);
 };
 
-const sortByCreatedAtDesc = (entries: JournalEntry[]): JournalEntry[] =>
+const sortByEntryDateDesc = (entries: JournalEntry[]): JournalEntry[] =>
   entries.sort(
     (firstEntry, secondEntry) =>
+      secondEntry.entryDate.localeCompare(firstEntry.entryDate) ||
       new Date(secondEntry.createdAt).getTime() -
-      new Date(firstEntry.createdAt).getTime(),
+        new Date(firstEntry.createdAt).getTime(),
   );
 
 export const getEntries = (): JournalEntry[] =>
-  sortByCreatedAtDesc(
+  sortByEntryDateDesc(
     readEntries().filter((entry) => entry.deletedAt === null),
   );
 
 export const createEntry = (
   content: string,
   title = '',
+  entryDate = getLocalDateKey(new Date()),
 ): JournalEntry | null => {
   const normalizedContent = content.trim();
 
-  if (!normalizedContent) {
+  if (!normalizedContent || !isDateKey(entryDate)) {
     return null;
   }
 
@@ -107,6 +155,7 @@ export const createEntry = (
     id: createId(),
     title: createTitle(normalizedContent, title),
     content: normalizedContent,
+    entryDate,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -120,14 +169,19 @@ export const createEntry = (
 
 export const updateEntry = (
   id: string,
-  fieldsOrContent: string | { title?: string; content: string },
+  fieldsOrContent: string | { title?: string; content: string; entryDate?: string },
 ): JournalEntry | null => {
   const normalizedContent =
     typeof fieldsOrContent === 'string'
       ? fieldsOrContent.trim()
       : fieldsOrContent.content.trim();
 
-  if (!normalizedContent) {
+  if (
+    !normalizedContent ||
+    (typeof fieldsOrContent !== 'string' &&
+      fieldsOrContent.entryDate !== undefined &&
+      !isDateKey(fieldsOrContent.entryDate))
+  ) {
     return null;
   }
 
@@ -143,6 +197,10 @@ export const updateEntry = (
   const updatedEntry: JournalEntry = {
     ...entries[entryIndex],
     content: normalizedContent,
+    entryDate:
+      typeof fieldsOrContent === 'string' || fieldsOrContent.entryDate === undefined
+        ? entries[entryIndex].entryDate
+        : fieldsOrContent.entryDate,
     title:
       typeof fieldsOrContent === 'string'
         ? createTitle(normalizedContent)

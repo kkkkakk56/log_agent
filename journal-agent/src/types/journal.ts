@@ -6,6 +6,7 @@ export interface JournalEntry {
   id: string;
   title: string;
   content: string;
+  entryDate: string;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;

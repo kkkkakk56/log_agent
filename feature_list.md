@@ -166,6 +166,7 @@ Codex 会优先读取这些任务卡：
 | `TASK-025` | `planned` | 做记仓库目标卡片：为每个仓库新增目标卡片来存放目标清单，并在完成时提供可交互动效 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-026` | `planned` | 笔记与做记多分支层级：知识库和做记项目内部支持最多 4 层分支树，用于组织主题、章节、模块或阶段 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-027` | `done` | 系统提醒与句子级定时提醒：为某条记录或记录中的某句话设置系统定时提醒，点击后回到对应位置 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-028` | `done` | 日记未来日期编辑：心记可以指定记录归属日期，并在未来任意日期下新增或编辑日记 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-021` | `planned` | 多类型资料检索与 Agent 读取：让搜索和 Agent 能理解日志、知识库、实验、项目等不同记录来源 | `cd journal-agent && npm run build && npm run test:agent-api` |
 | `TASK-023` | `planned` | 共同 Workspace 与权限控制：支持邀请他人加入共享 workspace，并只允许有权限的成员操作其中内容 | `cd journal-agent && npm run build` |
 | `TASK-024` | `done` | Agent 三记写入工具：允许 Agent 在受限协议下新增或编辑心记、笔记和做记记录，但不提供删除能力 | `cd journal-agent && npm run build && npm run test:agent-api` |
@@ -598,7 +599,7 @@ Codex 会优先读取这些任务卡：
 
 ### F031：系统提醒与句子级定时提醒
 
-状态：`planned`
+状态：`done`
 
 与系统提醒能力挂钩，让用户可以对某条心记、知识笔记或做记记录设置定时提醒；更细时，可以选中记录里的某句话设置提醒，像微信定时提醒一样在指定时间收到系统通知。点击通知后回到 App，并打开对应记录、定位到目标句子。
 
@@ -617,6 +618,29 @@ Codex 会优先读取这些任务卡：
 
 - `npm run build` 通过。
 - `npx cap sync ios` 通过，并识别到 `@capacitor/local-notifications@8.0.2`。
+
+### F032：日记未来日期编辑
+
+状态：`done`
+
+心记支持选择过去、今天或未来任意日期作为记录归属日期，并能在编辑时调整归属日期。这里会把“记录日期”和“真实创建 / 修改时间”拆开：时间线、日历和搜索按记录日期归档，创建时间只作为元信息保留。
+
+第一版只作用于心记 Park，不改变笔记和做记的数据结构。
+
+验收标准：
+
+- 心记记录有独立的 `entryDate / 记录日期` 字段，和 `createdAt`、`updatedAt` 分开保存。
+- 已有旧心记没有 `entryDate` 时，读取时自动用 `createdAt` 推导记录日期，不丢失历史记录。
+- 用户新增心记时可以选择过去、今天或未来任意日期。
+- 用户在日历里选中未来日期后，可以直接把新心记写到那一天。
+- 用户编辑已有心记时可以修改归属日期；保存后该心记会移动到新的时间线分组和日历日期。
+- 日历标记、选中日期列表、时间线分组和搜索结果都能展示正确的记录日期。
+- 第一版仅作用于心记 Park，不改变笔记和做记的数据结构。
+
+验证结果：
+
+- `npm run build` 通过。
+- `npx cap sync ios` 通过。
 
 ### F025：多类型资料检索与 Agent 读取
 
@@ -672,6 +696,6 @@ Codex 会优先读取这些任务卡：
 
 ## 下一步建议
 
-知识库抽屉导航、做记 Park 项目记录和 Agent 代写三记都已经可用。下一步可以回到 `TASK-005 / F005：草稿自动保存`，或者继续补 `F023：实验进度记录`。
+知识库抽屉导航、做记 Park 项目记录、Agent 代写三记、系统提醒和日记未来日期编辑都已经可用。下一步可以回到 `TASK-005 / F005：草稿自动保存`，或者继续补 `F023：实验进度记录`。
 
 计划区仍然作为后续 Park 保留在路线图里。

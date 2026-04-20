@@ -156,8 +156,10 @@ const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
 const draftTitle = ref('');
 const draftContent = ref('');
+const draftEntryDate = ref(getLocalDateKey(new Date()));
 const editingId = ref<string | null>(null);
 const editingContent = ref('');
+const editingEntryDate = ref('');
 const activeKnowledgeBaseId = ref<string | null>(knowledgeBases.value[0]?.id ?? null);
 const knowledgeDrawerOpen = ref(knowledgeBases.value.length === 0);
 const knowledgeBaseComposerOpen = ref(knowledgeBases.value.length === 0);
@@ -230,7 +232,7 @@ const entryCountByDate = computed(() => {
   const counts = new Map<string, number>();
 
   for (const entry of entries.value) {
-    const key = getLocalDateKey(entry.createdAt);
+    const key = getJournalEntryDateKey(entry);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
 
@@ -350,7 +352,25 @@ const activeParkSummary = computed(
 );
 
 const draftCharacterCount = computed(() => draftContent.value.trim().length);
-const canSaveDraft = computed(() => draftCharacterCount.value > 0);
+const canSaveDraft = computed(
+  () => draftCharacterCount.value > 0 && isJournalDateKey(draftEntryDate.value),
+);
+const draftDateLabel = computed(() => formatJournalDateKeyLabel(draftEntryDate.value));
+const draftDateTone = computed(() => {
+  if (!isJournalDateKey(draftEntryDate.value)) {
+    return '请选择有效的记录日期。';
+  }
+
+  if (isFutureDateKey(draftEntryDate.value)) {
+    return '这会作为未来日期记录，归档到对应那一天。';
+  }
+
+  if (draftEntryDate.value === getLocalDateKey(new Date())) {
+    return '默认记录到今天。';
+  }
+
+  return '这会作为补记，归档到选择的日期。';
+});
 const agentModeLabel = computed(() => getAgentModeLabel());
 const agentModelLabel = computed(() => getAgentModelLabel());
 const activeAgentConversation = computed(() =>
@@ -433,17 +453,11 @@ const calendarDays = computed(() => buildCalendarDays(calendarMonth.value));
 const currentMonthTitle = computed(() => formatMonthTitle(calendarMonth.value));
 
 const selectedDateEntries = computed(() =>
-  entries.value.filter((entry) => getLocalDateKey(entry.createdAt) === selectedDateKey.value),
+  entries.value.filter((entry) => getJournalEntryDateKey(entry) === selectedDateKey.value),
 );
 
 const selectedDateLabel = computed(() => {
-  const firstEntry = selectedDateEntries.value[0];
-
-  if (firstEntry) {
-    return getDateGroupLabel(firstEntry.createdAt);
-  }
-
-  return formatDateLabel(new Date(`${selectedDateKey.value}T00:00:00`));
+  return formatJournalDateKeyLabel(selectedDateKey.value);
 });
 
 function refreshEntries() {
@@ -459,6 +473,48 @@ function toDateTimeLocalInputValue(date: Date): string {
   const localDate = new Date(date.getTime() - timezoneOffset);
 
   return localDate.toISOString().slice(0, 16);
+}
+
+function isJournalDateKey(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(
+    new Date(`${value}T00:00:00`).getTime(),
+  );
+}
+
+function getJournalEntryDateKey(entry: JournalEntry): string {
+  return entry.entryDate || getLocalDateKey(entry.createdAt);
+}
+
+function formatJournalDateKeyLabel(dateKey: string): string {
+  if (!isJournalDateKey(dateKey)) {
+    return '未选择日期';
+  }
+
+  return formatDateLabel(new Date(`${dateKey}T00:00:00`));
+}
+
+function getJournalEntryDateLabel(entry: JournalEntry): string {
+  return getDateGroupLabel(`${getJournalEntryDateKey(entry)}T00:00:00`);
+}
+
+function isFutureDateKey(dateKey: string): boolean {
+  return isJournalDateKey(dateKey) && dateKey > getLocalDateKey(new Date());
+}
+
+function useSelectedDateForDraft() {
+  draftEntryDate.value = selectedDateKey.value;
+}
+
+function composeForSelectedDate() {
+  useSelectedDateForDraft();
+  activeView.value = 'timeline';
+  cancelEditing();
+  void nextTick(() => {
+    document.querySelector('.compose-card')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  });
 }
 
 function getDefaultReminderDateTime(): string {
@@ -1463,7 +1519,15 @@ function setActivePark(park: ActivePark) {
 }
 
 function saveDraft() {
-  const entry = createEntry(draftContent.value, draftTitle.value);
+  if (!isJournalDateKey(draftEntryDate.value)) {
+    return;
+  }
+
+  const entry = createEntry(
+    draftContent.value,
+    draftTitle.value,
+    draftEntryDate.value,
+  );
 
   if (!entry) {
     return;
@@ -1471,17 +1535,21 @@ function saveDraft() {
 
   draftTitle.value = '';
   draftContent.value = '';
+  selectedDateKey.value = entry.entryDate;
+  calendarMonth.value = startOfMonth(new Date(`${entry.entryDate}T00:00:00`));
   refreshEntries();
 }
 
 function startEditing(entry: JournalEntry) {
   editingId.value = entry.id;
   editingContent.value = entry.content;
+  editingEntryDate.value = getJournalEntryDateKey(entry);
 }
 
 function cancelEditing() {
   editingId.value = null;
   editingContent.value = '';
+  editingEntryDate.value = '';
 }
 
 function saveEditing() {
@@ -1489,7 +1557,14 @@ function saveEditing() {
     return;
   }
 
-  const updated = updateEntry(editingId.value, editingContent.value);
+  if (!isJournalDateKey(editingEntryDate.value)) {
+    return;
+  }
+
+  const updated = updateEntry(editingId.value, {
+    content: editingContent.value,
+    entryDate: editingEntryDate.value,
+  });
 
   if (!updated) {
     return;
@@ -1538,6 +1613,7 @@ function getCalendarMarkerClass(count: number): string {
 
 function selectCalendarDay(day: CalendarDay) {
   selectedDateKey.value = day.dateKey;
+  draftEntryDate.value = day.dateKey;
 
   if (!day.isCurrentMonth) {
     calendarMonth.value = startOfMonth(day.date);
@@ -1556,6 +1632,7 @@ function jumpToToday() {
   const today = new Date();
   calendarMonth.value = startOfMonth(today);
   selectedDateKey.value = getLocalDateKey(today);
+  draftEntryDate.value = selectedDateKey.value;
 }
 
 function toggleAgentPanel() {
@@ -1832,7 +1909,18 @@ onMounted(() => {
       </nav>
 
       <section v-if="activeView === 'timeline'" class="compose-card" aria-labelledby="compose-title">
-      <h2 id="compose-title" class="journal-section-title">今天想记点什么？</h2>
+      <h2 id="compose-title" class="journal-section-title">写到 {{ draftDateLabel }}</h2>
+
+      <label class="journal-date-field">
+        <span>记录日期</span>
+        <input
+          v-model="draftEntryDate"
+          class="date-input"
+          type="date"
+          aria-label="记录归属日期"
+        />
+        <small>{{ draftDateTone }}</small>
+      </label>
 
       <input
         v-model="draftTitle"
@@ -1890,13 +1978,22 @@ onMounted(() => {
           :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
         >
           <template v-if="editingId === entry.id">
+            <label class="journal-date-field compact">
+              <span>归属日期</span>
+              <input
+                v-model="editingEntryDate"
+                class="date-input"
+                type="date"
+                aria-label="编辑记录归属日期"
+              />
+            </label>
             <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
             <div class="entry-actions">
               <button class="ghost-action" type="button" @click="cancelEditing">取消</button>
               <button
                 class="primary-action small"
                 type="button"
-                :disabled="editingContent.trim().length === 0"
+                :disabled="editingContent.trim().length === 0 || !isJournalDateKey(editingEntryDate)"
                 @click="saveEditing"
               >
                 保存修改
@@ -1907,14 +2004,19 @@ onMounted(() => {
           <template v-else>
             <button class="entry-body" type="button" @click="startEditing(entry)">
               <span class="entry-time">
-                {{ getDateGroupLabel(entry.createdAt) }} · {{ formatEntryTime(entry.createdAt) }}
+                {{ getJournalEntryDateLabel(entry) }} · 创建 {{ formatEntryTime(entry.createdAt) }}
               </span>
               <strong>{{ entry.title }}</strong>
               <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
             </button>
 
             <div class="entry-footer">
-              <span>{{ entry.content.length }} 字</span>
+              <span class="entry-footnote">
+                {{ entry.content.length }} 字
+                <i v-if="isFutureDateKey(getJournalEntryDateKey(entry))" class="future-entry-badge">
+                  未来
+                </i>
+              </span>
               <div class="entry-footer-actions">
                 <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
                   提醒
@@ -1984,12 +2086,20 @@ onMounted(() => {
             <p class="eyebrow">选中日期</p>
             <h2>{{ selectedDateLabel }}</h2>
           </div>
-          <span class="counter">{{ selectedDateEntries.length }} 条</span>
+          <div class="selected-day-actions">
+            <button class="ghost-action" type="button" @click="composeForSelectedDate">
+              写到这天
+            </button>
+            <span class="counter">{{ selectedDateEntries.length }} 条</span>
+          </div>
         </div>
 
         <div v-if="selectedDateEntries.length === 0" class="empty-state">
           <p>这一天还没有记录。</p>
-          <span>可以回到时间线，为这一天之后补上回忆。</span>
+          <span>可以直接为这一天写记录，未来日期也会被放进对应日历格。</span>
+          <button class="ghost-action empty-action" type="button" @click="composeForSelectedDate">
+            写到这一天
+          </button>
         </div>
 
         <div v-else class="entry-groups">
@@ -2001,13 +2111,22 @@ onMounted(() => {
             :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
           >
             <template v-if="editingId === entry.id">
+              <label class="journal-date-field compact">
+                <span>归属日期</span>
+                <input
+                  v-model="editingEntryDate"
+                  class="date-input"
+                  type="date"
+                  aria-label="编辑记录归属日期"
+                />
+              </label>
               <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
               <div class="entry-actions">
                 <button class="ghost-action" type="button" @click="cancelEditing">取消</button>
                 <button
                   class="primary-action small"
                   type="button"
-                  :disabled="editingContent.trim().length === 0"
+                  :disabled="editingContent.trim().length === 0 || !isJournalDateKey(editingEntryDate)"
                   @click="saveEditing"
                 >
                   保存修改
@@ -2017,13 +2136,18 @@ onMounted(() => {
 
             <template v-else>
               <button class="entry-body" type="button" @click="startEditing(entry)">
-                <span class="entry-time">{{ formatEntryTime(entry.createdAt) }}</span>
+                <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
                 <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
               </button>
 
               <div class="entry-footer">
-                <span>{{ entry.content.length }} 字</span>
+                <span class="entry-footnote">
+                  {{ entry.content.length }} 字
+                  <i v-if="isFutureDateKey(getJournalEntryDateKey(entry))" class="future-entry-badge">
+                    未来
+                  </i>
+                </span>
                 <div class="entry-footer-actions">
                   <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
                     提醒
@@ -2059,13 +2183,22 @@ onMounted(() => {
             :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
           >
             <template v-if="editingId === entry.id">
+              <label class="journal-date-field compact">
+                <span>归属日期</span>
+                <input
+                  v-model="editingEntryDate"
+                  class="date-input"
+                  type="date"
+                  aria-label="编辑记录归属日期"
+                />
+              </label>
               <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
               <div class="entry-actions">
                 <button class="ghost-action" type="button" @click="cancelEditing">取消</button>
                 <button
                   class="primary-action small"
                   type="button"
-                  :disabled="editingContent.trim().length === 0"
+                  :disabled="editingContent.trim().length === 0 || !isJournalDateKey(editingEntryDate)"
                   @click="saveEditing"
                 >
                   保存修改
@@ -2075,13 +2208,18 @@ onMounted(() => {
 
             <template v-else>
               <button class="entry-body" type="button" @click="startEditing(entry)">
-                <span class="entry-time">{{ formatEntryTime(entry.createdAt) }}</span>
+                <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
                 <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
               </button>
 
               <div class="entry-footer">
-                <span>{{ entry.content.length }} 字</span>
+                <span class="entry-footnote">
+                  {{ entry.content.length }} 字
+                  <i v-if="isFutureDateKey(getJournalEntryDateKey(entry))" class="future-entry-badge">
+                    未来
+                  </i>
+                </span>
                 <div class="entry-footer-actions">
                   <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
                     提醒

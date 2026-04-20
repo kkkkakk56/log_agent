@@ -38,6 +38,12 @@ const getYesterday = (date: Date): Date => {
 
 const getTimestamp = (iso: string): number => parseDate(iso)?.getTime() ?? 0;
 
+const getEntryDateKey = (entry: JournalEntry): string =>
+  entry.entryDate || getLocalDateKey(entry.createdAt);
+
+const getDateKeyTimestamp = (dateKey: string): number =>
+  parseDate(`${dateKey}T00:00:00`)?.getTime() ?? 0;
+
 export const getLocalDateKey = (value: Date | string): string => {
   const date = parseDate(value);
 
@@ -128,12 +134,14 @@ export const groupEntriesByDate = (
   const groups = new Map<string, JournalDateGroup>();
   const sortedEntries = [...entries].sort(
     (firstEntry, secondEntry) =>
+      getDateKeyTimestamp(getEntryDateKey(secondEntry)) -
+        getDateKeyTimestamp(getEntryDateKey(firstEntry)) ||
       getTimestamp(secondEntry.createdAt) - getTimestamp(firstEntry.createdAt),
   );
 
   for (const entry of sortedEntries) {
-    const key = getLocalDateKey(entry.createdAt) || 'invalid-date';
-    const label = getDateGroupLabel(entry.createdAt);
+    const key = getEntryDateKey(entry) || 'invalid-date';
+    const label = getDateGroupLabel(`${key}T00:00:00`);
     const group = groups.get(key);
 
     if (group) {
