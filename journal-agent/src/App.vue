@@ -15,6 +15,7 @@ import type { LabProject, LabRecord, LabRecordType } from './types/lab';
 import type { DailyJournalReminderSettings } from './types/dailyReminder';
 import type { RecordReminder, ReminderTargetType } from './types/reminder';
 import type { TodoMark, TodoParkType, TodoTargetType } from './types/todo';
+import type { VaultEntry } from './types/vault';
 import {
   createAgentMessage,
   getAgentModeLabel,
@@ -45,6 +46,14 @@ import {
   getDailyJournalReminderSettings,
   setDailyJournalReminderEnabled,
 } from './storage/dailyReminderStore';
+import {
+  initializeVault,
+  isVaultConfigured,
+  isVaultFeatureSupported,
+  saveVaultEntries,
+  unlockVault,
+  type VaultSession,
+} from './storage/vaultStore';
 import {
   completeTodo,
   createTodo,
@@ -121,7 +130,7 @@ import {
   getBranchPathLabel,
 } from './utils/branchTree';
 
-type ActivePark = 'journal' | 'knowledge' | 'lab' | 'todo' | 'plan';
+type ActivePark = 'journal' | 'knowledge' | 'lab' | 'todo' | 'vault' | 'plan';
 type ActiveView = 'timeline' | 'search' | 'calendar';
 type TodoParkFilter = 'all' | TodoParkType;
 type TodoQuickFilter = 'all' | 'reminder' | 'today';
@@ -235,6 +244,10 @@ const dailyJournalReminder = ref<DailyJournalReminderSettings>(
   getDailyJournalReminderSettings(),
 );
 const todos = ref<TodoMark[]>(getTodos());
+const vaultConfigured = ref(isVaultConfigured());
+const vaultCryptoSupported = isVaultFeatureSupported();
+const vaultEntries = ref<VaultEntry[]>([]);
+const vaultSession = ref<VaultSession | null>(null);
 const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
 const draftTitle = ref('');
@@ -357,6 +370,18 @@ const cachedTodoSelection = ref<{
   anchor: TextAnchor;
   capturedAt: number;
 } | null>(null);
+const vaultStatusMessage = ref('');
+const vaultIsBusy = ref(false);
+const vaultSetupPassword = ref('');
+const vaultSetupPasswordConfirm = ref('');
+const vaultUnlockPassword = ref('');
+const editingVaultEntryId = ref<string | null>(null);
+const vaultEntryTitle = ref('');
+const vaultEntryAccount = ref('');
+const vaultEntryPassword = ref('');
+const vaultEntryWebsite = ref('');
+const vaultEntryNote = ref('');
+const revealedVaultEntryIds = ref<Set<string>>(new Set());
 
 const visibleJournalEntries = computed(() =>
   entries.value.filter((entry) => !isCardTodoDone('journal', entry.id)),
@@ -595,6 +620,31 @@ const canCreateLabRecord = computed(
 const canSaveLabRecord = computed(
   () => Boolean(editingLabRecordId.value) && editingLabRecordContent.value.trim().length > 0,
 );
+const isVaultUnlocked = computed(() => vaultSession.value !== null);
+const vaultEntryCount = computed(() => vaultEntries.value.length);
+const vaultLockStatusLabel = computed(() => {
+  if (!vaultConfigured.value) {
+    return '未设置';
+  }
+
+  return isVaultUnlocked.value ? '已解锁' : '已上锁';
+});
+const canCreateVault = computed(
+  () =>
+    vaultCryptoSupported &&
+    vaultSetupPassword.value.trim().length >= 4 &&
+    vaultSetupPassword.value === vaultSetupPasswordConfirm.value,
+);
+const canUnlockVault = computed(
+  () => vaultCryptoSupported && vaultUnlockPassword.value.trim().length > 0,
+);
+const canSaveVaultEntry = computed(
+  () =>
+    isVaultUnlocked.value &&
+    vaultEntryTitle.value.trim().length > 0 &&
+    vaultEntryAccount.value.trim().length > 0 &&
+    vaultEntryPassword.value.trim().length > 0,
+);
 
 const parkSummaries = computed<ParkSummary[]>(() => [
   {
@@ -628,6 +678,18 @@ const parkSummaries = computed<ParkSummary[]>(() => [
     description: '从心记和做记里自然长出的行动项。',
     metricValue: String(openTodoCount.value),
     metricLabel: '待办',
+  },
+  {
+    id: 'vault',
+    label: '密库',
+    title: '密库',
+    description: vaultConfigured.value
+      ? isVaultUnlocked.value
+        ? '本地加密保存账号与密码；离开后会自动重新上锁。'
+        : '本地加密保存账号与密码；进入前需要先解锁。'
+      : '先设置一个解锁密码，再把项目账号和密码收进来。',
+    metricValue: String(vaultEntryCount.value),
+    metricLabel: '凭据',
   },
 ]);
 
@@ -808,6 +870,277 @@ function refreshDailyJournalReminder() {
 
 function refreshTodos() {
   todos.value = getTodos();
+}
+
+function sortVaultItems(items: VaultEntry[]): VaultEntry[] {
+  return [...items].sort(
+    (firstItem, secondItem) =>
+      new Date(secondItem.updatedAt).getTime() - new Date(firstItem.updatedAt).getTime(),
+  );
+}
+
+function createVaultEntryId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `vault-entry-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function resetVaultEntryDraft() {
+  editingVaultEntryId.value = null;
+  vaultEntryTitle.value = '';
+  vaultEntryAccount.value = '';
+  vaultEntryPassword.value = '';
+  vaultEntryWebsite.value = '';
+  vaultEntryNote.value = '';
+}
+
+function lockVault(message = '') {
+  vaultSession.value = null;
+  vaultEntries.value = [];
+  vaultUnlockPassword.value = '';
+  revealedVaultEntryIds.value = new Set();
+  resetVaultEntryDraft();
+
+  if (message) {
+    vaultStatusMessage.value = message;
+  }
+}
+
+async function persistVaultItems(
+  nextItems: VaultEntry[],
+  successMessage: string,
+): Promise<boolean> {
+  if (!vaultSession.value) {
+    vaultStatusMessage.value = '请先解锁密库。';
+    return false;
+  }
+
+  vaultIsBusy.value = true;
+
+  try {
+    const didSave = await saveVaultEntries(nextItems, vaultSession.value);
+
+    if (!didSave) {
+      vaultStatusMessage.value = '密库保存失败，请稍后再试。';
+      return false;
+    }
+
+    vaultEntries.value = sortVaultItems(nextItems);
+    vaultConfigured.value = isVaultConfigured();
+    vaultStatusMessage.value = successMessage;
+    return true;
+  } finally {
+    vaultIsBusy.value = false;
+  }
+}
+
+function startVaultEntryEditing(entry: VaultEntry) {
+  editingVaultEntryId.value = entry.id;
+  vaultEntryTitle.value = entry.title;
+  vaultEntryAccount.value = entry.account;
+  vaultEntryPassword.value = entry.password;
+  vaultEntryWebsite.value = entry.website ?? '';
+  vaultEntryNote.value = entry.note ?? '';
+}
+
+function cancelVaultEntryEditing() {
+  resetVaultEntryDraft();
+}
+
+async function saveVaultEntryDraft() {
+  if (!canSaveVaultEntry.value || vaultIsBusy.value) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const title = vaultEntryTitle.value.trim().slice(0, 80);
+  const account = vaultEntryAccount.value.trim().slice(0, 160);
+  const password = vaultEntryPassword.value.trim().slice(0, 200);
+  const website = vaultEntryWebsite.value.trim().slice(0, 200);
+  const note = vaultEntryNote.value.trim().slice(0, 500);
+  const existingEntryId = editingVaultEntryId.value;
+  const nextItems = existingEntryId
+    ? vaultEntries.value.map((entry) =>
+        entry.id === existingEntryId
+          ? {
+              ...entry,
+              title,
+              account,
+              password,
+              website: website || undefined,
+              note: note || undefined,
+              updatedAt: now,
+            }
+          : entry,
+      )
+    : [
+        {
+          id: createVaultEntryId(),
+          title,
+          account,
+          password,
+          website: website || undefined,
+          note: note || undefined,
+          createdAt: now,
+          updatedAt: now,
+        },
+        ...vaultEntries.value,
+      ];
+
+  const didSave = await persistVaultItems(
+    nextItems,
+    existingEntryId ? '密码卡片已更新。' : '密码卡片已保存。',
+  );
+
+  if (didSave) {
+    resetVaultEntryDraft();
+  }
+}
+
+async function removeVaultEntry(entry: VaultEntry) {
+  const shouldDelete = window.confirm(`删除「${entry.title}」这张密码卡片？`);
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  const didSave = await persistVaultItems(
+    vaultEntries.value.filter((item) => item.id !== entry.id),
+    '密码卡片已删除。',
+  );
+
+  if (didSave && editingVaultEntryId.value === entry.id) {
+    resetVaultEntryDraft();
+  }
+}
+
+function toggleVaultPasswordVisibility(entryId: string) {
+  const nextIds = new Set(revealedVaultEntryIds.value);
+
+  if (nextIds.has(entryId)) {
+    nextIds.delete(entryId);
+  } else {
+    nextIds.add(entryId);
+  }
+
+  revealedVaultEntryIds.value = nextIds;
+}
+
+function isVaultPasswordVisible(entryId: string): boolean {
+  return revealedVaultEntryIds.value.has(entryId);
+}
+
+function getVaultPasswordDisplay(entry: VaultEntry): string {
+  return isVaultPasswordVisible(entry.id) ? entry.password : '••••••••';
+}
+
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fall through to the legacy selection-based copy path.
+    }
+  }
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const didCopy = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return didCopy;
+  } catch {
+    return false;
+  }
+}
+
+async function copyVaultField(value: string, label: '账号' | '密码') {
+  if (!value.trim()) {
+    vaultStatusMessage.value = `没有可复制的${label}。`;
+    return;
+  }
+
+  const didCopy = await copyTextToClipboard(value);
+  vaultStatusMessage.value = didCopy
+    ? `${label}已复制。`
+    : `${label}复制失败，请稍后再试。`;
+}
+
+async function submitVaultSetup() {
+  if (!vaultCryptoSupported) {
+    vaultStatusMessage.value = '当前环境不支持本地加密密库。';
+    return;
+  }
+
+  if (vaultSetupPassword.value.trim().length < 4) {
+    vaultStatusMessage.value = '请设置至少 4 位的解锁密码。';
+    return;
+  }
+
+  if (vaultSetupPassword.value !== vaultSetupPasswordConfirm.value) {
+    vaultStatusMessage.value = '两次输入的解锁密码不一致。';
+    return;
+  }
+
+  vaultIsBusy.value = true;
+
+  try {
+    const result = await initializeVault(vaultSetupPassword.value);
+
+    if (!result) {
+      vaultStatusMessage.value = '密库初始化失败，请稍后再试。';
+      return;
+    }
+
+    vaultSession.value = result.session;
+    vaultEntries.value = sortVaultItems(result.entries);
+    vaultConfigured.value = true;
+    vaultSetupPassword.value = '';
+    vaultSetupPasswordConfirm.value = '';
+    vaultUnlockPassword.value = '';
+    vaultStatusMessage.value = '密库已创建并解锁，现在可以开始保存账号密码。';
+  } finally {
+    vaultIsBusy.value = false;
+  }
+}
+
+async function submitVaultUnlock() {
+  if (!canUnlockVault.value || vaultIsBusy.value) {
+    return;
+  }
+
+  vaultIsBusy.value = true;
+
+  try {
+    const result = await unlockVault(vaultUnlockPassword.value);
+
+    if (!result) {
+      vaultStatusMessage.value = '解锁失败，请确认密码是否正确。';
+      return;
+    }
+
+    vaultSession.value = result.session;
+    vaultEntries.value = sortVaultItems(result.entries);
+    vaultUnlockPassword.value = '';
+    vaultStatusMessage.value = '密库已解锁。';
+  } finally {
+    vaultIsBusy.value = false;
+  }
+}
+
+function handleDocumentVisibilityChange() {
+  if (document.hidden && isVaultUnlocked.value) {
+    lockVault('密库已自动上锁。');
+  }
 }
 
 function getReminderTargetTypeForTodo(todo: TodoMark): ReminderTargetType {
@@ -3358,6 +3691,10 @@ function setActiveView(view: ActiveView) {
 }
 
 function setActivePark(park: ActivePark) {
+  if (activePark.value === 'vault' && park !== 'vault' && isVaultUnlocked.value) {
+    lockVault('密库已自动上锁。');
+  }
+
   activePark.value = park;
   cancelEditing();
   cancelKnowledgeNoteEditing();
@@ -3809,6 +4146,7 @@ let removeReminderNotificationActionListener: (() => void) | null = null;
 
 onMounted(() => {
   document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
+  document.addEventListener('visibilitychange', handleDocumentVisibilityChange);
   window.addEventListener('resize', handleAgentViewportResize);
   void nextTick(initializeAgentFabPosition);
   void syncDailyJournalReminderOnLaunch();
@@ -3828,6 +4166,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', captureTodoSelectionFromWindow);
+  document.removeEventListener('visibilitychange', handleDocumentVisibilityChange);
   window.removeEventListener('resize', handleAgentViewportResize);
   removeReminderNotificationActionListener?.();
   removeReminderNotificationActionListener = null;
@@ -4695,6 +5034,317 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </section>
+    </section>
+
+    <section
+      v-else-if="activePark === 'vault'"
+      class="park-workspace vault-workspace"
+      aria-label="密库"
+    >
+      <section class="tool-card vault-access-card" aria-labelledby="vault-access-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Password Park</p>
+            <h2 id="vault-access-title">
+              {{
+                !vaultConfigured
+                  ? '创建密库'
+                  : isVaultUnlocked
+                    ? '账号密码卡片'
+                    : '解锁密库'
+              }}
+            </h2>
+          </div>
+          <span class="counter">{{ vaultLockStatusLabel }}</span>
+        </div>
+
+        <p class="vault-copy">
+          这个 Park 专门存放项目的账号和密码。当前版本先用自定义解锁密码作为 Face ID 的降级方案，数据会在本地加密保存。
+        </p>
+
+        <p v-if="vaultStatusMessage" class="vault-status">
+          {{ vaultStatusMessage }}
+        </p>
+
+        <template v-if="!vaultCryptoSupported">
+          <div class="empty-state vault-empty">
+            <p>当前环境暂不支持本地加密密库。</p>
+            <span>请在支持 Web Crypto 的浏览器或 iOS WebView 中使用这个 Park。</span>
+          </div>
+        </template>
+
+        <template v-else-if="!vaultConfigured">
+          <div class="vault-lock-grid">
+            <label class="vault-field">
+              <span>设置解锁密码</span>
+              <input
+                v-model="vaultSetupPassword"
+                type="password"
+                maxlength="32"
+                placeholder="至少 4 位，用来进入密库"
+              />
+            </label>
+            <label class="vault-field">
+              <span>再次输入密码</span>
+              <input
+                v-model="vaultSetupPasswordConfirm"
+                type="password"
+                maxlength="32"
+                placeholder="再输一次，避免手滑"
+                @keyup.enter="submitVaultSetup"
+              />
+            </label>
+          </div>
+
+          <div class="vault-lock-hint">
+            <span>这组密码会用于本地加密你的密库数据。</span>
+            <span>先落地自定义密码，后续如果要接 Face ID，可以在这个门禁上继续加。</span>
+          </div>
+
+          <div class="entry-actions">
+            <button
+              class="primary-action small"
+              type="button"
+              :disabled="vaultIsBusy || !canCreateVault"
+              @click="submitVaultSetup"
+            >
+              {{ vaultIsBusy ? '创建中...' : '创建密库' }}
+            </button>
+          </div>
+        </template>
+
+        <template v-else-if="!isVaultUnlocked">
+          <label class="vault-field">
+            <span>输入解锁密码</span>
+            <input
+              v-model="vaultUnlockPassword"
+              type="password"
+              maxlength="32"
+              placeholder="输入你设置过的密码"
+              @keyup.enter="submitVaultUnlock"
+            />
+          </label>
+
+          <div class="vault-lock-hint">
+            <span>每次重新进入这个 Park 都需要解锁。</span>
+            <span>切到其他 Park 或 App 退到后台后，密库会自动上锁。</span>
+          </div>
+
+          <div class="entry-actions">
+            <button class="ghost-action" type="button" @click="vaultUnlockPassword = ''">
+              清空
+            </button>
+            <button
+              class="primary-action small"
+              type="button"
+              :disabled="vaultIsBusy || !canUnlockVault"
+              @click="submitVaultUnlock"
+            >
+              {{ vaultIsBusy ? '解锁中...' : '解锁密库' }}
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="vault-summary-row">
+            <div class="park-boundary-list vault-summary-cards" aria-label="密库摘要">
+              <div>
+                <strong>{{ vaultEntryCount }} 条密码卡片</strong>
+                <span>建议按项目、网站或服务拆卡，一张卡里放一组账号和密码。</span>
+              </div>
+              <div>
+                <strong>离开自动上锁</strong>
+                <span>切到别的 Park 或切后台后，会清掉本次解锁状态。</span>
+              </div>
+            </div>
+
+            <div class="entry-actions vault-summary-actions">
+              <button class="ghost-action" type="button" @click="lockVault('密库已上锁。')">
+                立即上锁
+              </button>
+            </div>
+          </div>
+        </template>
+      </section>
+
+      <template v-if="isVaultUnlocked">
+        <section class="tool-card vault-editor-card" aria-labelledby="vault-editor-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">
+                {{ editingVaultEntryId ? '编辑卡片' : '新增卡片' }}
+              </p>
+              <h2 id="vault-editor-title">
+                {{ editingVaultEntryId ? '更新账号密码' : '新建账号密码卡片' }}
+              </h2>
+            </div>
+          </div>
+
+          <div class="vault-form-grid">
+            <label class="vault-field">
+              <span>项目 / 服务名称</span>
+              <input
+                v-model="vaultEntryTitle"
+                type="text"
+                maxlength="80"
+                placeholder="例如：GitHub / 飞书 / 测试服务器"
+              />
+            </label>
+
+            <label class="vault-field">
+              <span>账号</span>
+              <input
+                v-model="vaultEntryAccount"
+                type="text"
+                maxlength="160"
+                placeholder="邮箱、用户名或手机号"
+              />
+            </label>
+
+            <label class="vault-field">
+              <span>密码</span>
+              <input
+                v-model="vaultEntryPassword"
+                type="text"
+                maxlength="200"
+                placeholder="项目对应的密码"
+              />
+            </label>
+
+            <label class="vault-field">
+              <span>入口地址，可选</span>
+              <input
+                v-model="vaultEntryWebsite"
+                type="text"
+                maxlength="200"
+                placeholder="例如：https://github.com/login"
+              />
+            </label>
+          </div>
+
+          <label class="vault-field">
+            <span>备注，可选</span>
+            <textarea
+              v-model="vaultEntryNote"
+              rows="3"
+              maxlength="500"
+              placeholder="例如：这是测试环境账号，记得每月轮换密码。"
+            ></textarea>
+          </label>
+
+          <div class="entry-actions">
+            <button
+              v-if="editingVaultEntryId"
+              class="ghost-action"
+              type="button"
+              @click="cancelVaultEntryEditing"
+            >
+              取消编辑
+            </button>
+            <button
+              class="primary-action small"
+              type="button"
+              :disabled="vaultIsBusy || !canSaveVaultEntry"
+              @click="saveVaultEntryDraft"
+            >
+              {{
+                vaultIsBusy
+                  ? '保存中...'
+                  : editingVaultEntryId
+                    ? '保存修改'
+                    : '保存卡片'
+              }}
+            </button>
+          </div>
+        </section>
+
+        <section class="tool-card vault-list-card" aria-labelledby="vault-list-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Encrypted cards</p>
+              <h2 id="vault-list-title">账号密码列表</h2>
+            </div>
+            <span class="counter">{{ vaultEntryCount }} 条</span>
+          </div>
+
+          <div v-if="vaultEntryCount === 0" class="empty-state vault-empty">
+            <p>现在还没有账号密码卡片。</p>
+            <span>先新建一张卡片，后面每张卡都会提供“复制账号”和“复制密码”按钮。</span>
+          </div>
+
+          <div v-else class="vault-entry-list">
+            <article
+              v-for="entry in vaultEntries"
+              :key="entry.id"
+              class="vault-entry-card"
+            >
+              <div class="section-heading compact vault-entry-heading">
+                <div>
+                  <p class="eyebrow">密码卡片</p>
+                  <h3 class="vault-entry-title">{{ entry.title }}</h3>
+                </div>
+                <div class="vault-card-actions">
+                  <button class="ghost-action" type="button" @click="startVaultEntryEditing(entry)">
+                    编辑
+                  </button>
+                  <button class="delete-action" type="button" @click="removeVaultEntry(entry)">
+                    删除
+                  </button>
+                </div>
+              </div>
+
+              <div class="vault-entry-meta">
+                <span>
+                  更新于 {{ getDateGroupLabel(entry.updatedAt) }} ·
+                  {{ formatEntryTime(entry.updatedAt) }}
+                </span>
+                <small v-if="entry.website">入口：{{ entry.website }}</small>
+              </div>
+
+              <div class="vault-entry-grid">
+                <div class="vault-copy-card">
+                  <span>账号</span>
+                  <strong>{{ entry.account }}</strong>
+                  <button
+                    class="ghost-action"
+                    type="button"
+                    @click="copyVaultField(entry.account, '账号')"
+                  >
+                    复制账号
+                  </button>
+                </div>
+
+                <div class="vault-copy-card">
+                  <span>密码</span>
+                  <strong class="vault-password-value">
+                    {{ getVaultPasswordDisplay(entry) }}
+                  </strong>
+                  <div class="vault-copy-actions">
+                    <button
+                      class="ghost-action"
+                      type="button"
+                      @click="toggleVaultPasswordVisibility(entry.id)"
+                    >
+                      {{ isVaultPasswordVisible(entry.id) ? '隐藏' : '显示' }}
+                    </button>
+                    <button
+                      class="ghost-action"
+                      type="button"
+                      @click="copyVaultField(entry.password, '密码')"
+                    >
+                      复制密码
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <p v-if="entry.note" class="vault-note">
+                {{ entry.note }}
+              </p>
+            </article>
+          </div>
+        </section>
+      </template>
     </section>
 
     <section

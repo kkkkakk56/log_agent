@@ -718,6 +718,30 @@
       "notes": "已完成。心记卡片正文默认收起为摘要，高度通过缓动过渡展开；展开状态在时间线、搜索和日历三处共用同一套交互。验证通过：npm run build，npx cap sync ios。"
     },
     {
+      "id": "TASK-035",
+      "featureId": "F037",
+      "category": "feature",
+      "description": "密库 Park：新增本地加密的账号密码管理区，用自定义密码解锁，并支持一键复制账号和密码",
+      "status": "done",
+      "priority": 20,
+      "dependsOn": [
+        "F021"
+      ],
+      "steps": [
+        "新增一个独立的密库 Park，不和其他记录 Park 混在一起",
+        "首次进入密库时设置自定义解锁密码，并使用本地加密保存数据",
+        "已设置密码后，重新进入密库前必须先解锁，未解锁时不能查看卡片内容",
+        "每张卡片支持项目或服务名称、账号、密码，以及可选入口地址和备注",
+        "账号和密码分别提供独立复制按钮，可以一键复制",
+        "密码默认遮挡显示，但支持手动显示或隐藏",
+        "支持新增、编辑、删除密码卡片",
+        "切换到其他 Park 或进入后台后，密库自动上锁"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。当前版本按用户允许的降级方案，先使用自定义解锁密码替代 Face ID；密库内容通过 PBKDF2 派生密钥后使用 AES-GCM 在本地加密保存。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
       "id": "TASK-021",
       "featureId": "F025",
       "category": "feature",
@@ -1498,6 +1522,32 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。当前实现为每条心记独立保存展开状态，正文默认折叠为摘要，通过 max-height 和卡片位移动画做缓冲过渡。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F037",
+      "title": "密库 Park 与本地加密账号管理",
+      "status": "done",
+      "priority": 20,
+      "phase": "M3-record-hub",
+      "summary": "新增一个独立的密库 Park，用于保存项目、网站或服务的账号密码卡片；当前版本先用自定义密码解锁，并在本地加密保存内容。",
+      "dependsOn": [
+        "F021"
+      ],
+      "acceptanceCriteria": [
+        "顶层导航新增一个独立的密库 Park，不和心记、笔记、做记内容混在一起。",
+        "首次进入密库时，需要先设置一组自定义解锁密码；当前版本先不强依赖 Face ID。",
+        "已设置密码后，重新进入密库前必须先解锁，未解锁时不能查看已有账号密码卡片内容。",
+        "密库里的每张卡片至少包含项目或服务名称、账号、密码，并支持可选入口地址和备注。",
+        "每张卡片里的账号和密码分别提供独立复制按钮，可以一键复制。",
+        "密码默认遮挡显示，但可以手动显示或隐藏，避免列表里长期明文暴露。",
+        "用户可以新增、编辑、删除账号密码卡片。",
+        "切换到其他 Park 或 App 进入后台后，密库会自动上锁。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。当前版本按用户允许的降级方案，先使用自定义解锁密码替代 Face ID；密库内容通过 PBKDF2 派生密钥后使用 AES-GCM 在本地加密保存，复制功能优先使用 Clipboard API。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "F025",
