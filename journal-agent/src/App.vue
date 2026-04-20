@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { CalendarDay } from './utils/date';
 import type { JournalEntry } from './types/journal';
 import type { KnowledgeBase, KnowledgeNote } from './types/knowledge';
 import type { LabProject, LabRecord, LabRecordType } from './types/lab';
 import type { RecordReminder, ReminderTargetType } from './types/reminder';
+import type { TodoMark, TodoParkType, TodoTargetType } from './types/todo';
 import {
   createAgentMessage,
   getAgentModeLabel,
@@ -32,6 +33,17 @@ import {
   getReminderById,
   updateReminder,
 } from './storage/reminderStore';
+import {
+  completeTodo,
+  createTodo,
+  deleteDoneTodos,
+  deleteTodo,
+  deleteTodosForNote,
+  deleteTodosForNotes,
+  getTodos,
+  reopenTodo,
+  updateTodoDoneNote,
+} from './storage/todoStore';
 import {
   createEntry,
   deleteEntry,
@@ -63,6 +75,7 @@ import {
   listenForReminderNotificationActions,
   scheduleReminderNotification,
 } from './services/reminderNotifications';
+import { createAnchor, resolveAnchor, type TextAnchor } from './utils/textAnchor';
 import {
   WEEKDAY_LABELS,
   addMonths,
@@ -77,8 +90,10 @@ import {
   startOfMonth,
 } from './utils/date';
 
-type ActivePark = 'journal' | 'knowledge' | 'lab' | 'plan';
+type ActivePark = 'journal' | 'knowledge' | 'lab' | 'todo' | 'plan';
 type ActiveView = 'timeline' | 'search' | 'calendar';
+type TodoParkFilter = 'all' | TodoParkType;
+type TodoQuickFilter = 'all' | 'reminder' | 'today';
 type KnowledgeInspectorMode =
   | 'base'
   | 'base-edit'
@@ -107,6 +122,24 @@ interface ReminderTargetDraft {
   parentId: string | null;
   title: string;
   content: string;
+}
+
+interface TodoTargetDraft {
+  parkType: TodoParkType;
+  noteId: string;
+  title: string;
+  content: string;
+}
+
+interface TodoSourceItem {
+  todo: TodoMark;
+  title: string;
+  content: string;
+  parkLabel: string;
+  sourceLabel: string;
+  createdLabel: string;
+  hasReminder: boolean;
+  isMissing: boolean;
 }
 
 const LAB_RECORD_TYPE_META: Record<LabRecordType, { label: string }> = {
@@ -152,6 +185,7 @@ const knowledgeNotes = ref<KnowledgeNote[]>(getKnowledgeNotes());
 const labProjects = ref<LabProject[]>(getLabProjects());
 const labRecords = ref<LabRecord[]>(getLabRecords());
 const reminders = ref<RecordReminder[]>(getActiveReminders());
+const todos = ref<TodoMark[]>(getTodos());
 const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
 const draftTitle = ref('');
@@ -225,8 +259,45 @@ const highlightedReminderTarget = ref<{
   targetId: string;
   quote: string;
 } | null>(null);
+const highlightedTodoId = ref<string | null>(null);
+const todoStatusMessage = ref('');
+const todoCompletionDraft = ref<TodoMark | null>(null);
+const todoCompletionNote = ref('');
+const todoCompletionTimer = ref<number | null>(null);
+const journalCompletedOpen = ref(false);
+const selectedDateCompletedOpen = ref(false);
+const labCompletedOpen = ref(false);
+const globalCompletedOpen = ref(false);
+const hideDoneSentenceTodos = ref(false);
+const expandedHiddenTodoIds = ref<Set<string>>(new Set());
+const todoParkFilter = ref<TodoParkFilter>('all');
+const todoQuickFilter = ref<TodoQuickFilter>('all');
+const cachedTodoSelection = ref<{
+  parkType: TodoParkType;
+  noteId: string;
+  text: string;
+  anchor: TextAnchor;
+  capturedAt: number;
+} | null>(null);
 
-const groupedEntries = computed(() => groupEntriesByDate(entries.value));
+const visibleJournalEntries = computed(() =>
+  entries.value.filter((entry) => !isCardTodoDone('journal', entry.id)),
+);
+
+const groupedEntries = computed(() => groupEntriesByDate(visibleJournalEntries.value));
+
+const completedJournalEntryItems = computed(() =>
+  entries.value
+    .map((entry) => ({
+      entry,
+      todo: getCardTodo('journal', entry.id),
+    }))
+    .filter(
+      (item): item is { entry: JournalEntry; todo: TodoMark } =>
+        item.todo?.status === 'done',
+    )
+    .sort((firstItem, secondItem) => (secondItem.todo.doneAt ?? 0) - (firstItem.todo.doneAt ?? 0)),
+);
 
 const entryCountByDate = computed(() => {
   const counts = new Map<string, number>();
@@ -244,6 +315,10 @@ const todayCount = computed(() => {
 
   return entryCountByDate.value.get(today) ?? 0;
 });
+
+const openTodoCount = computed(
+  () => todos.value.filter((todo) => todo.status === 'open').length,
+);
 
 const activeKnowledgeBase = computed(
   () =>
@@ -282,6 +357,23 @@ const activeLabRecords = computed(() => {
 
   return labRecords.value.filter((record) => record.projectId === projectId);
 });
+
+const activeOpenLabRecords = computed(() =>
+  activeLabRecords.value.filter((record) => !isCardTodoDone('project', record.id)),
+);
+
+const activeCompletedLabRecordItems = computed(() =>
+  activeLabRecords.value
+    .map((record) => ({
+      record,
+      todo: getCardTodo('project', record.id),
+    }))
+    .filter(
+      (item): item is { record: LabRecord; todo: TodoMark } =>
+        item.todo?.status === 'done',
+    )
+    .sort((firstItem, secondItem) => (secondItem.todo.doneAt ?? 0) - (firstItem.todo.doneAt ?? 0)),
+);
 
 const selectedLabRecord = computed(
   () =>
@@ -342,6 +434,14 @@ const parkSummaries = computed<ParkSummary[]>(() => [
     description: '项目操作和阶段复盘会按项目沉淀在这里。',
     metricValue: String(labProjects.value.length),
     metricLabel: '项目',
+  },
+  {
+    id: 'todo',
+    label: '✓ 待办',
+    title: '我的待办',
+    description: '从心记和做记里自然长出的行动项。',
+    metricValue: String(openTodoCount.value),
+    metricLabel: '待办',
   },
 ]);
 
@@ -416,6 +516,27 @@ const activeReminders = computed(() =>
   ),
 );
 const visibleReminders = computed(() => activeReminders.value.slice(0, 4));
+const todoSourceItems = computed(() =>
+  todos.value.map((todo) => resolveTodoSource(todo)).filter((item) => !item.isMissing),
+);
+const filteredOpenTodoItems = computed(() =>
+  todoSourceItems.value.filter(
+    (item) =>
+      item.todo.status === 'open' &&
+      matchesTodoParkFilter(item.todo) &&
+      matchesTodoQuickFilter(item),
+  ),
+);
+const filteredDoneTodoItems = computed(() =>
+  todoSourceItems.value
+    .filter(
+      (item) =>
+        item.todo.status === 'done' &&
+        matchesTodoParkFilter(item.todo) &&
+        matchesTodoQuickFilter(item),
+    )
+    .sort((firstItem, secondItem) => (secondItem.todo.doneAt ?? 0) - (firstItem.todo.doneAt ?? 0)),
+);
 const reminderMinDateTime = computed(() =>
   toDateTimeLocalInputValue(new Date(Date.now() + 60_000)),
 );
@@ -440,7 +561,7 @@ const searchResults = computed(() => {
     return [];
   }
 
-  return entries.value.filter((entry) => {
+  return visibleJournalEntries.value.filter((entry) => {
     const searchableText = [entry.title, entry.content, ...entry.tags]
       .join(' ')
       .toLocaleLowerCase();
@@ -453,7 +574,15 @@ const calendarDays = computed(() => buildCalendarDays(calendarMonth.value));
 const currentMonthTitle = computed(() => formatMonthTitle(calendarMonth.value));
 
 const selectedDateEntries = computed(() =>
-  entries.value.filter((entry) => getJournalEntryDateKey(entry) === selectedDateKey.value),
+  visibleJournalEntries.value.filter(
+    (entry) => getJournalEntryDateKey(entry) === selectedDateKey.value,
+  ),
+);
+
+const selectedDateCompletedEntryItems = computed(() =>
+  completedJournalEntryItems.value.filter(
+    (item) => getJournalEntryDateKey(item.entry) === selectedDateKey.value,
+  ),
 );
 
 const selectedDateLabel = computed(() => {
@@ -466,6 +595,777 @@ function refreshEntries() {
 
 function refreshReminders() {
   reminders.value = getActiveReminders();
+}
+
+function refreshTodos() {
+  todos.value = getTodos();
+}
+
+function getReminderTargetTypeForTodo(todo: TodoMark): ReminderTargetType {
+  return todo.parkType === 'journal' ? 'journal-entry' : 'lab-record';
+}
+
+function getTodoParkLabel(parkType: TodoParkType): string {
+  return parkType === 'journal' ? '心记' : '做记';
+}
+
+function getTodoTargetTypeLabel(targetType: TodoTargetType): string {
+  return targetType === 'card' ? '卡片' : '句子';
+}
+
+function parseTodoSourceDataset(value: string | undefined): {
+  parkType: TodoParkType;
+  noteId: string;
+} | null {
+  if (!value) {
+    return null;
+  }
+
+  const [parkType, noteId] = value.split(':');
+
+  if ((parkType !== 'journal' && parkType !== 'project') || !noteId) {
+    return null;
+  }
+
+  return {
+    parkType,
+    noteId,
+  };
+}
+
+function getTodoSourceContent(
+  parkType: TodoParkType,
+  noteId: string,
+): string | null {
+  if (parkType === 'journal') {
+    return entries.value.find((entry) => entry.id === noteId)?.content ?? null;
+  }
+
+  return labRecords.value.find((record) => record.id === noteId)?.content ?? null;
+}
+
+function captureTodoSelectionFromWindow() {
+  const selection = window.getSelection();
+  const selectedText = selection?.toString().trim() ?? '';
+
+  if (!selection || !selectedText || selection.rangeCount === 0) {
+    return;
+  }
+
+  const range = selection.getRangeAt(0);
+  const sourceElement =
+    range.commonAncestorContainer instanceof HTMLElement
+      ? range.commonAncestorContainer.closest<HTMLElement>('[data-todo-source]')
+      : range.commonAncestorContainer.parentElement?.closest<HTMLElement>(
+          '[data-todo-source]',
+        );
+  const source = parseTodoSourceDataset(sourceElement?.dataset.todoSource);
+
+  if (!source) {
+    return;
+  }
+
+  const content = getTodoSourceContent(source.parkType, source.noteId);
+  const anchor = content ? createAnchor(selectedText, content) : null;
+
+  if (!anchor) {
+    return;
+  }
+
+  cachedTodoSelection.value = {
+    ...source,
+    text: selectedText,
+    anchor,
+    capturedAt: Date.now(),
+  };
+}
+
+function getCachedTodoAnchor(target: TodoTargetDraft): TextAnchor | null {
+  const cachedSelection = cachedTodoSelection.value;
+
+  if (
+    !cachedSelection ||
+    cachedSelection.parkType !== target.parkType ||
+    cachedSelection.noteId !== target.noteId ||
+    !target.content.includes(cachedSelection.anchor.sentenceText)
+  ) {
+    return null;
+  }
+
+  return cachedSelection.anchor;
+}
+
+function getCardTodo(parkType: TodoParkType, noteId: string): TodoMark | null {
+  return (
+    todos.value.find(
+      (todo) =>
+        todo.parkType === parkType &&
+        todo.noteId === noteId &&
+        todo.targetType === 'card',
+    ) ?? null
+  );
+}
+
+function getSentenceTodosForTarget(
+  parkType: TodoParkType,
+  noteId: string,
+): TodoMark[] {
+  return todos.value.filter(
+    (todo) =>
+      todo.parkType === parkType &&
+      todo.noteId === noteId &&
+      todo.targetType === 'sentence',
+  );
+}
+
+function isCardTodoDone(parkType: TodoParkType, noteId: string): boolean {
+  return getCardTodo(parkType, noteId)?.status === 'done';
+}
+
+function hasDoneSentenceTodosForPark(parkType: TodoParkType): boolean {
+  return todos.value.some(
+    (todo) =>
+      todo.parkType === parkType &&
+      todo.targetType === 'sentence' &&
+      todo.status === 'done',
+  );
+}
+
+function isCardTodoHighlighted(parkType: TodoParkType, noteId: string): boolean {
+  const todo = getCardTodo(parkType, noteId);
+
+  return Boolean(todo && isTodoHighlighted(todo.id));
+}
+
+function getTodoStatusIcon(todo: TodoMark): string {
+  if (todo.targetType === 'sentence') {
+    return todo.status === 'done' ? '☑' : '☐';
+  }
+
+  return todo.status === 'done' ? '●' : '○';
+}
+
+function getCardTodoIcon(parkType: TodoParkType, noteId: string): string {
+  const todo = getCardTodo(parkType, noteId);
+
+  return todo ? getTodoStatusIcon(todo) : '';
+}
+
+function getCardTodoDoneLabel(parkType: TodoParkType, noteId: string): string {
+  const todo = getCardTodo(parkType, noteId);
+
+  if (!todo || todo.status !== 'done') {
+    return '';
+  }
+
+  return `${formatTodoDateTime(todo.doneAt)} 完成`;
+}
+
+function toggleCardTodo(parkType: TodoParkType, noteId: string) {
+  const todo = getCardTodo(parkType, noteId);
+
+  if (!todo) {
+    return;
+  }
+
+  toggleTodoStatus(todo);
+}
+
+function isTodoHighlighted(todoId: string): boolean {
+  return highlightedTodoId.value === todoId;
+}
+
+function formatTodoDateTime(timestamp?: number): string {
+  if (!timestamp) {
+    return '';
+  }
+
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return `${getDateGroupLabel(date.toISOString())} ${formatEntryTime(date.toISOString())}`;
+}
+
+function isTodayTimestamp(timestamp: number): boolean {
+  return getLocalDateKey(new Date(timestamp)) === getLocalDateKey(new Date());
+}
+
+function todoHasReminder(todo: TodoMark): boolean {
+  if (todo.reminderId) {
+    return true;
+  }
+
+  return activeReminders.value.some(
+    (reminder) =>
+      reminder.targetType === getReminderTargetTypeForTodo(todo) &&
+      reminder.targetId === todo.noteId,
+  );
+}
+
+function todoHasTodayReminder(todo: TodoMark): boolean {
+  const today = getLocalDateKey(new Date());
+
+  return activeReminders.value.some(
+    (reminder) =>
+      reminder.targetType === getReminderTargetTypeForTodo(todo) &&
+      reminder.targetId === todo.noteId &&
+      getLocalDateKey(reminder.scheduledAt) === today,
+  );
+}
+
+function resolveTodoSource(todo: TodoMark): TodoSourceItem {
+  const missingSource: TodoSourceItem = {
+    todo,
+    title: '来源记录不可用',
+    content: todo.sentenceText ?? '',
+    parkLabel: getTodoParkLabel(todo.parkType),
+    sourceLabel: '来源已删除',
+    createdLabel: `${formatTodoDateTime(todo.createdAt)} 创建`,
+    hasReminder: todoHasReminder(todo),
+    isMissing: true,
+  };
+
+  if (todo.parkType === 'journal') {
+    const entry = entries.value.find((item) => item.id === todo.noteId);
+
+    if (!entry) {
+      return missingSource;
+    }
+
+    return {
+      todo,
+      title: entry.title,
+      content: todo.targetType === 'sentence' ? todo.sentenceText ?? entry.content : entry.content,
+      parkLabel: '心记',
+      sourceLabel: `心记 / ${formatJournalDateKeyLabel(getJournalEntryDateKey(entry))}`,
+      createdLabel: `${formatTodoDateTime(todo.createdAt)} 创建`,
+      hasReminder: todoHasReminder(todo),
+      isMissing: false,
+    };
+  }
+
+  const record = labRecords.value.find((item) => item.id === todo.noteId);
+
+  if (!record) {
+    return missingSource;
+  }
+
+  const project = labProjects.value.find((item) => item.id === record.projectId);
+
+  return {
+    todo,
+    title: record.title,
+    content: todo.targetType === 'sentence' ? todo.sentenceText ?? record.content : record.content,
+    parkLabel: '做记',
+    sourceLabel: `做记 / ${project?.name ?? '未知项目'}`,
+    createdLabel: `${formatTodoDateTime(todo.createdAt)} 创建`,
+    hasReminder: todoHasReminder(todo),
+    isMissing: false,
+  };
+}
+
+function matchesTodoParkFilter(todo: TodoMark): boolean {
+  return todoParkFilter.value === 'all' || todo.parkType === todoParkFilter.value;
+}
+
+function matchesTodoQuickFilter(item: TodoSourceItem): boolean {
+  if (todoQuickFilter.value === 'reminder') {
+    return item.hasReminder;
+  }
+
+  if (todoQuickFilter.value === 'today') {
+    return isTodayTimestamp(item.todo.createdAt) || todoHasTodayReminder(item.todo);
+  }
+
+  return true;
+}
+
+function getTodoSelectedAnchor(target: TodoTargetDraft) {
+  return (
+    getCachedTodoAnchor(target) ??
+    createAnchor(window.getSelection()?.toString() ?? '', target.content)
+  );
+}
+
+function createTodoForTarget(target: TodoTargetDraft) {
+  const selectedAnchor = getTodoSelectedAnchor(target);
+  const existingCardTodo = getCardTodo(target.parkType, target.noteId);
+  let todo: TodoMark | null = null;
+
+  if (selectedAnchor) {
+    cachedTodoSelection.value = null;
+    const existingSentenceTodo = getSentenceTodosForTarget(
+      target.parkType,
+      target.noteId,
+    ).find((item) => item.sentenceText === selectedAnchor.sentenceText);
+
+    if (existingSentenceTodo) {
+      highlightedTodoId.value = existingSentenceTodo.id;
+      todoStatusMessage.value = '这段文字已经是待办了。';
+      return;
+    }
+
+    todo = createTodo({
+      parkType: target.parkType,
+      noteId: target.noteId,
+      targetType: 'sentence',
+      sentenceText: selectedAnchor.sentenceText,
+      sentenceApproxOffset: selectedAnchor.sentenceApproxOffset,
+    });
+  } else if (existingCardTodo) {
+    highlightedTodoId.value = existingCardTodo.id;
+    todoStatusMessage.value =
+      existingCardTodo.status === 'done'
+        ? '这张卡片已在已完成待办里，可点击圆点恢复为待办。'
+        : '这张卡片已经是待办了。';
+    return;
+  } else {
+    todo = createTodo({
+      parkType: target.parkType,
+      noteId: target.noteId,
+      targetType: 'card',
+    });
+  }
+
+  if (!todo) {
+    todoStatusMessage.value = '待办创建失败，请稍后再试。';
+    return;
+  }
+
+  highlightedTodoId.value = todo.id;
+  todoStatusMessage.value =
+    todo.targetType === 'sentence'
+      ? '已把选中的文字标记为待办。'
+      : `已把「${target.title}」标记为待办。`;
+  refreshTodos();
+}
+
+function createJournalTodo(entry: JournalEntry) {
+  createTodoForTarget({
+    parkType: 'journal',
+    noteId: entry.id,
+    title: entry.title,
+    content: entry.content,
+  });
+}
+
+function createLabTodo(record: LabRecord) {
+  createTodoForTarget({
+    parkType: 'project',
+    noteId: record.id,
+    title: record.title,
+    content: record.content,
+  });
+}
+
+function clearTodoCompletionTimer() {
+  if (todoCompletionTimer.value !== null) {
+    window.clearTimeout(todoCompletionTimer.value);
+    todoCompletionTimer.value = null;
+  }
+}
+
+function closeTodoCompletionDraft() {
+  clearTodoCompletionTimer();
+  todoCompletionDraft.value = null;
+  todoCompletionNote.value = '';
+}
+
+function openTodoCompletionDraft(todo: TodoMark) {
+  closeTodoCompletionDraft();
+  todoCompletionDraft.value = todo;
+  todoCompletionNote.value = todo.doneNote ?? '';
+  todoCompletionTimer.value = window.setTimeout(() => {
+    closeTodoCompletionDraft();
+  }, 2000);
+}
+
+function keepTodoCompletionPanelOpen() {
+  clearTodoCompletionTimer();
+}
+
+function saveTodoCompletionNote() {
+  if (!todoCompletionDraft.value) {
+    return;
+  }
+
+  updateTodoDoneNote(todoCompletionDraft.value.id, todoCompletionNote.value);
+  todoStatusMessage.value = todoCompletionNote.value.trim()
+    ? '完成备注已保存。'
+    : '已完成，未添加备注。';
+  refreshTodos();
+  closeTodoCompletionDraft();
+}
+
+function toggleTodoStatus(todo: TodoMark) {
+  if (todo.status === 'done') {
+    const shouldReopen = window.confirm('取消完成？会恢复为待办状态');
+
+    if (!shouldReopen) {
+      return;
+    }
+
+    const reopenedTodo = reopenTodo(todo.id);
+
+    if (!reopenedTodo) {
+      return;
+    }
+
+    highlightedTodoId.value = reopenedTodo.id;
+    todoStatusMessage.value = '已恢复为待办。';
+    refreshTodos();
+    return;
+  }
+
+  const completedTodo = completeTodo(todo.id);
+
+  if (!completedTodo) {
+    return;
+  }
+
+  highlightedTodoId.value = completedTodo.id;
+  todoStatusMessage.value = '完成啦。';
+  refreshTodos();
+  openTodoCompletionDraft(completedTodo);
+}
+
+function toggleTodoById(todoId: string) {
+  const todo = todos.value.find((item) => item.id === todoId);
+
+  if (!todo) {
+    return;
+  }
+
+  toggleTodoStatus(todo);
+}
+
+function expandHiddenTodo(todoId: string) {
+  expandedHiddenTodoIds.value = new Set([...expandedHiddenTodoIds.value, todoId]);
+}
+
+function handleTodoContentClick(event: MouseEvent) {
+  const target = event.target;
+
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const expandTarget = target.closest<HTMLElement>('[data-todo-expand]');
+
+  if (expandTarget?.dataset.todoExpand) {
+    expandHiddenTodo(expandTarget.dataset.todoExpand);
+    return;
+  }
+
+  const toggleTarget = target.closest<HTMLElement>('[data-todo-id]');
+
+  if (toggleTarget?.dataset.todoId) {
+    toggleTodoById(toggleTarget.dataset.todoId);
+  }
+}
+
+function getUnresolvedSentenceTodos(
+  parkType: TodoParkType,
+  noteId: string,
+  content: string,
+): TodoMark[] {
+  return getSentenceTodosForTarget(parkType, noteId).filter(
+    (todo) => !resolveAnchor(todo, content).found,
+  );
+}
+
+function showUnresolvedTodoOriginals(
+  parkType: TodoParkType,
+  noteId: string,
+  content: string,
+) {
+  const unresolvedTodos = getUnresolvedSentenceTodos(parkType, noteId, content);
+
+  if (unresolvedTodos.length === 0) {
+    return;
+  }
+
+  window.alert(
+    unresolvedTodos
+      .map((todo, index) => `${index + 1}. ${todo.sentenceText ?? '原文不可用'}`)
+      .join('\n\n'),
+  );
+}
+
+function removeUnresolvedSentenceTodos(
+  parkType: TodoParkType,
+  noteId: string,
+  content: string,
+) {
+  const unresolvedTodos = getUnresolvedSentenceTodos(parkType, noteId, content);
+
+  if (unresolvedTodos.length === 0) {
+    return;
+  }
+
+  const shouldDelete = window.confirm(
+    `删除 ${unresolvedTodos.length} 个无法定位的待办？此操作不可恢复。`,
+  );
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  unresolvedTodos.forEach((todo) => deleteTodo(todo.id));
+  refreshTodos();
+  todoStatusMessage.value = '无法定位的待办已删除。';
+}
+
+function deleteDoneTodosWithConfirm(count: number, queryLabel: string, query: Parameters<typeof deleteDoneTodos>[0]) {
+  if (count === 0) {
+    return;
+  }
+
+  const shouldDelete = window.confirm(
+    `清空 ${count} 条已完成待办？此操作不可恢复。`,
+  );
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  deleteDoneTodos(query);
+  refreshTodos();
+  todoStatusMessage.value = `${queryLabel}的已完成待办已清空。`;
+}
+
+function clearJournalDoneCardTodos() {
+  deleteDoneTodosWithConfirm(
+    completedJournalEntryItems.value.length,
+    '心记',
+    { parkType: 'journal', targetType: 'card' },
+  );
+}
+
+function clearSelectedDateDoneCardTodos() {
+  deleteDoneTodosWithConfirm(
+    selectedDateCompletedEntryItems.value.length,
+    '这一天',
+    {
+      parkType: 'journal',
+      targetType: 'card',
+      noteIds: selectedDateCompletedEntryItems.value.map((item) => item.entry.id),
+    },
+  );
+}
+
+function clearLabDoneCardTodos() {
+  deleteDoneTodosWithConfirm(
+    activeCompletedLabRecordItems.value.length,
+    '当前项目',
+    {
+      parkType: 'project',
+      targetType: 'card',
+      noteIds: activeCompletedLabRecordItems.value.map((item) => item.record.id),
+    },
+  );
+}
+
+function clearGlobalDoneTodos() {
+  const count = filteredDoneTodoItems.value.length;
+
+  if (count === 0) {
+    return;
+  }
+
+  const shouldDelete = window.confirm(
+    `清空 ${count} 条已完成待办？此操作不可恢复。`,
+  );
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  filteredDoneTodoItems.value.forEach((item) => deleteTodo(item.todo.id));
+  refreshTodos();
+  todoStatusMessage.value = '当前筛选的已完成待办已清空。';
+}
+
+function focusTodoSource(todo: TodoMark) {
+  highlightedTodoId.value = todo.id;
+
+  if (todo.parkType === 'journal') {
+    const entry = entries.value.find((item) => item.id === todo.noteId);
+
+    activePark.value = 'journal';
+    activeView.value = 'timeline';
+
+    if (entry) {
+      selectedDateKey.value = getJournalEntryDateKey(entry);
+      calendarMonth.value = startOfMonth(new Date(`${selectedDateKey.value}T00:00:00`));
+    }
+
+    if (todo.status === 'done' && todo.targetType === 'card') {
+      journalCompletedOpen.value = true;
+    }
+
+    void scrollTodoTargetIntoView(todo);
+    return;
+  }
+
+  const record = labRecords.value.find((item) => item.id === todo.noteId);
+
+  activePark.value = 'lab';
+  activeLabProjectId.value = record?.projectId ?? activeLabProjectId.value;
+  selectedLabRecordId.value = todo.noteId;
+  labInspectorMode.value = 'record-view';
+  labDrawerOpen.value = false;
+
+  if (todo.status === 'done' && todo.targetType === 'card') {
+    labCompletedOpen.value = true;
+  }
+
+  void scrollTodoTargetIntoView(todo);
+}
+
+async function scrollTodoTargetIntoView(todo: TodoMark) {
+  await nextTick();
+
+  window.setTimeout(() => {
+    const targetElement =
+      document.querySelector(`[data-todo-target="${todo.id}"]`) ??
+      document.querySelector(
+        `[data-todo-source="${todo.parkType}:${todo.noteId}"]`,
+      );
+
+    targetElement?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, 80);
+}
+
+function renderTodoContent(
+  content: string,
+  parkType: TodoParkType,
+  noteId: string,
+  reminderTargetType: ReminderTargetType,
+): string {
+  type ContentRange = {
+    offset: number;
+    length: number;
+    kind: 'todo' | 'reminder';
+    todo?: TodoMark;
+  };
+
+  const ranges: ContentRange[] = [];
+
+  for (const todo of getSentenceTodosForTarget(parkType, noteId)) {
+    const resolvedAnchor = resolveAnchor(todo, content);
+
+    if (
+      resolvedAnchor.found &&
+      resolvedAnchor.offset !== undefined &&
+      resolvedAnchor.length !== undefined
+    ) {
+      ranges.push({
+        offset: resolvedAnchor.offset,
+        length: resolvedAnchor.length,
+        kind: 'todo',
+        todo,
+      });
+    }
+  }
+
+  const highlightedTarget = highlightedReminderTarget.value;
+
+  if (
+    highlightedTarget &&
+    highlightedTarget.targetType === reminderTargetType &&
+    highlightedTarget.targetId === noteId &&
+    highlightedTarget.quote
+  ) {
+    const quoteIndex = content.indexOf(highlightedTarget.quote);
+
+    if (quoteIndex >= 0) {
+      ranges.push({
+        offset: quoteIndex,
+        length: highlightedTarget.quote.length,
+        kind: 'reminder',
+      });
+    }
+  }
+
+  const normalizedRanges = ranges
+    .sort((firstRange, secondRange) => firstRange.offset - secondRange.offset)
+    .reduce<ContentRange[]>((acceptedRanges, range) => {
+      const previousRange = acceptedRanges[acceptedRanges.length - 1];
+      const previousEnd = previousRange
+        ? previousRange.offset + previousRange.length
+        : -1;
+
+      if (range.offset < previousEnd) {
+        return acceptedRanges;
+      }
+
+      return [...acceptedRanges, range];
+    }, []);
+
+  if (normalizedRanges.length === 0) {
+    return escapeHtml(content);
+  }
+
+  let renderedContent = '';
+  let cursor = 0;
+
+  for (const range of normalizedRanges) {
+    renderedContent += escapeHtml(content.slice(cursor, range.offset));
+
+    const rangeText = content.slice(range.offset, range.offset + range.length);
+
+    if (range.kind === 'todo' && range.todo) {
+      const todo = range.todo;
+      const isDone = todo.status === 'done';
+      const isHidden =
+        isDone &&
+        hideDoneSentenceTodos.value &&
+        !expandedHiddenTodoIds.value.has(todo.id);
+      const todoClasses = [
+        'todo-sentence-mark',
+        isDone ? 'is-done' : 'is-open',
+        isTodoHighlighted(todo.id) ? 'is-highlighted' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      if (isHidden) {
+        renderedContent += [
+          `<span class="todo-hidden-placeholder" data-todo-expand="${escapeHtml(todo.id)}">`,
+          '⋯',
+          '</span>',
+        ].join('');
+      } else {
+        renderedContent += [
+          `<span class="${todoClasses}" data-todo-target="${escapeHtml(todo.id)}">`,
+          `<span class="todo-inline-toggle" data-todo-id="${escapeHtml(todo.id)}">`,
+          getTodoStatusIcon(todo),
+          '</span>',
+          `<span class="todo-sentence-text">${escapeHtml(rangeText)}</span>`,
+          '</span>',
+        ].join('');
+      }
+    } else {
+      renderedContent += [
+        '<mark class="reminder-target-highlight">',
+        escapeHtml(rangeText),
+        '</mark>',
+      ].join('');
+    }
+
+    cursor = range.offset + range.length;
+  }
+
+  renderedContent += escapeHtml(content.slice(cursor));
+
+  return renderedContent;
 }
 
 function toDateTimeLocalInputValue(date: Date): string {
@@ -1367,10 +2267,17 @@ function removeLabProject(project: LabProject) {
       .map((record) => cancelTargetReminders('lab-record', record.id)),
   );
   deleteLabProject(project.id);
+  deleteTodosForNotes(
+    'project',
+    labRecords.value
+      .filter((record) => record.projectId === project.id)
+      .map((record) => record.id),
+  );
   selectedLabRecordId.value = null;
   labInspectorMode.value = 'project';
   cancelLabRecordEditing();
   refreshLabData();
+  refreshTodos();
 }
 
 function startLabRecordComposer() {
@@ -1462,6 +2369,7 @@ function removeLabRecord(record: LabRecord) {
 
   deleteLabRecord(record.id);
   void cancelTargetReminders('lab-record', record.id);
+  deleteTodosForNote('project', record.id);
 
   if (
     editingLabRecordId.value === record.id ||
@@ -1473,6 +2381,7 @@ function removeLabRecord(record: LabRecord) {
   }
 
   refreshLabData();
+  refreshTodos();
 }
 
 function refreshAgentConversations() {
@@ -1583,12 +2492,14 @@ function removeEntry(entry: JournalEntry) {
 
   deleteEntry(entry.id);
   void cancelTargetReminders('journal-entry', entry.id);
+  deleteTodosForNote('journal', entry.id);
 
   if (editingId.value === entry.id) {
     cancelEditing();
   }
 
   refreshEntries();
+  refreshTodos();
 }
 
 function getEntryCountForDate(dateKey: string): number {
@@ -1753,9 +2664,15 @@ async function submitAgentMessage() {
 }
 
 onMounted(() => {
+  document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
   void listenForReminderNotificationActions((action) => {
     focusReminderById(action.reminderId);
   });
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', captureTodoSelectionFromWindow);
+  clearTodoCompletionTimer();
 });
 </script>
 
@@ -1975,7 +2892,11 @@ onMounted(() => {
           :key="entry.id"
           class="entry-card"
           :data-reminder-target="`journal-entry:${entry.id}`"
-          :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
+          :data-todo-source="`journal:${entry.id}`"
+          :class="{
+            'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
+            'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
+          }"
         >
           <template v-if="editingId === entry.id">
             <label class="journal-date-field compact">
@@ -2002,13 +2923,48 @@ onMounted(() => {
           </template>
 
           <template v-else>
-            <button class="entry-body" type="button" @click="startEditing(entry)">
+            <div
+              v-if="getCardTodo('journal', entry.id)"
+              class="todo-card-strip"
+              :data-todo-target="getCardTodo('journal', entry.id)?.id"
+            >
+              <button
+                class="todo-card-toggle"
+                type="button"
+                @click="toggleCardTodo('journal', entry.id)"
+              >
+                {{ getCardTodoIcon('journal', entry.id) }}
+              </button>
+              <span>卡片待办</span>
+              <small v-if="isCardTodoDone('journal', entry.id)">
+                {{ getCardTodoDoneLabel('journal', entry.id) }}
+              </small>
+            </div>
+            <div class="entry-body selectable-entry-body">
               <span class="entry-time">
                 {{ getJournalEntryDateLabel(entry) }} · 创建 {{ formatEntryTime(entry.createdAt) }}
               </span>
               <strong>{{ entry.title }}</strong>
-              <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
-            </button>
+              <p
+                @click.stop="handleTodoContentClick"
+                v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
+              ></p>
+            </div>
+
+            <div
+              v-if="getUnresolvedSentenceTodos('journal', entry.id, entry.content).length > 0"
+              class="todo-unresolved"
+            >
+              <span>
+                有 {{ getUnresolvedSentenceTodos('journal', entry.id, entry.content).length }} 个待办无法定位
+              </span>
+              <button type="button" @click="showUnresolvedTodoOriginals('journal', entry.id, entry.content)">
+                查看原文
+              </button>
+              <button type="button" @click="removeUnresolvedSentenceTodos('journal', entry.id, entry.content)">
+                删除
+              </button>
+            </div>
 
             <div class="entry-footer">
               <span class="entry-footnote">
@@ -2020,6 +2976,17 @@ onMounted(() => {
               <div class="entry-footer-actions">
                 <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
                   提醒
+                </button>
+                <button
+                  class="ghost-action reminder-action"
+                  type="button"
+                  @pointerdown="captureTodoSelectionFromWindow"
+                  @click="createJournalTodo(entry)"
+                >
+                  待办
+                </button>
+                <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
+                  编辑
                 </button>
                 <button class="delete-action" type="button" @click="removeEntry(entry)">
                   删除
@@ -2108,7 +3075,11 @@ onMounted(() => {
             :key="entry.id"
             class="entry-card"
             :data-reminder-target="`journal-entry:${entry.id}`"
-            :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
+            :data-todo-source="`journal:${entry.id}`"
+            :class="{
+              'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
+              'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
+            }"
           >
             <template v-if="editingId === entry.id">
               <label class="journal-date-field compact">
@@ -2135,11 +3106,46 @@ onMounted(() => {
             </template>
 
             <template v-else>
-              <button class="entry-body" type="button" @click="startEditing(entry)">
+              <div
+                v-if="getCardTodo('journal', entry.id)"
+                class="todo-card-strip"
+                :data-todo-target="getCardTodo('journal', entry.id)?.id"
+              >
+                <button
+                  class="todo-card-toggle"
+                  type="button"
+                  @click="toggleCardTodo('journal', entry.id)"
+                >
+                  {{ getCardTodoIcon('journal', entry.id) }}
+                </button>
+                <span>卡片待办</span>
+                <small v-if="isCardTodoDone('journal', entry.id)">
+                  {{ getCardTodoDoneLabel('journal', entry.id) }}
+                </small>
+              </div>
+              <div class="entry-body selectable-entry-body">
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
-                <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
-              </button>
+                <p
+                  @click.stop="handleTodoContentClick"
+                  v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
+                ></p>
+              </div>
+
+              <div
+                v-if="getUnresolvedSentenceTodos('journal', entry.id, entry.content).length > 0"
+                class="todo-unresolved"
+              >
+                <span>
+                  有 {{ getUnresolvedSentenceTodos('journal', entry.id, entry.content).length }} 个待办无法定位
+                </span>
+                <button type="button" @click="showUnresolvedTodoOriginals('journal', entry.id, entry.content)">
+                  查看原文
+                </button>
+                <button type="button" @click="removeUnresolvedSentenceTodos('journal', entry.id, entry.content)">
+                  删除
+                </button>
+              </div>
 
               <div class="entry-footer">
                 <span class="entry-footnote">
@@ -2152,6 +3158,17 @@ onMounted(() => {
                   <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
                     提醒
                   </button>
+                  <button
+                    class="ghost-action reminder-action"
+                    type="button"
+                    @pointerdown="captureTodoSelectionFromWindow"
+                    @click="createJournalTodo(entry)"
+                  >
+                    待办
+                  </button>
+                  <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
+                    编辑
+                  </button>
                   <button class="delete-action" type="button" @click="removeEntry(entry)">
                     删除
                   </button>
@@ -2160,11 +3177,67 @@ onMounted(() => {
             </template>
           </article>
         </div>
+
+        <section
+          v-if="selectedDateCompletedEntryItems.length > 0"
+          class="completed-todo-group"
+        >
+          <button
+            class="completed-todo-heading"
+            type="button"
+            @click="selectedDateCompletedOpen = !selectedDateCompletedOpen"
+          >
+            <span>{{ selectedDateCompletedOpen ? '▾' : '▸' }} 已完成</span>
+            <small>{{ selectedDateCompletedEntryItems.length }}</small>
+          </button>
+          <div v-if="selectedDateCompletedOpen" class="completed-todo-actions">
+            <button class="delete-action" type="button" @click="clearSelectedDateDoneCardTodos">
+              清空已完成
+            </button>
+          </div>
+          <div v-if="selectedDateCompletedOpen" class="entry-groups">
+            <article
+              v-for="item in selectedDateCompletedEntryItems"
+              :key="item.todo.id"
+              class="entry-card is-todo-done"
+              :data-todo-source="`journal:${item.entry.id}`"
+              :data-todo-target="item.todo.id"
+            >
+              <div class="todo-card-strip is-done">
+                <button
+                  class="todo-card-toggle is-done"
+                  type="button"
+                  @click="toggleTodoStatus(item.todo)"
+                >
+                  {{ getTodoStatusIcon(item.todo) }}
+                </button>
+                <span>卡片待办</span>
+                <small>{{ formatTodoDateTime(item.todo.doneAt) }} 完成</small>
+              </div>
+              <div class="entry-body">
+                <span class="entry-time">创建 {{ formatEntryTime(item.entry.createdAt) }}</span>
+                <strong>{{ item.entry.title }}</strong>
+                <p
+                  @click.stop="handleTodoContentClick"
+                  v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
+                ></p>
+              </div>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
 
     <section v-if="activeView === 'timeline'" class="timeline" aria-labelledby="timeline-title">
       <h2 id="timeline-title" class="journal-section-title">日志时间线</h2>
+
+      <label
+        v-if="hasDoneSentenceTodosForPark('journal')"
+        class="todo-hide-toggle"
+      >
+        <input v-model="hideDoneSentenceTodos" type="checkbox" />
+        <span>隐藏已完成的句子待办</span>
+      </label>
 
       <div v-if="entries.length === 0" class="empty-state">
         <p>还没有日志。</p>
@@ -2180,7 +3253,11 @@ onMounted(() => {
             :key="entry.id"
             class="entry-card"
             :data-reminder-target="`journal-entry:${entry.id}`"
-            :class="{ 'is-reminder-target': isReminderHighlighted('journal-entry', entry.id) }"
+            :data-todo-source="`journal:${entry.id}`"
+            :class="{
+              'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
+              'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
+            }"
           >
             <template v-if="editingId === entry.id">
               <label class="journal-date-field compact">
@@ -2207,11 +3284,46 @@ onMounted(() => {
             </template>
 
             <template v-else>
-              <button class="entry-body" type="button" @click="startEditing(entry)">
+              <div
+                v-if="getCardTodo('journal', entry.id)"
+                class="todo-card-strip"
+                :data-todo-target="getCardTodo('journal', entry.id)?.id"
+              >
+                <button
+                  class="todo-card-toggle"
+                  type="button"
+                  @click="toggleCardTodo('journal', entry.id)"
+                >
+                  {{ getCardTodoIcon('journal', entry.id) }}
+                </button>
+                <span>卡片待办</span>
+                <small v-if="isCardTodoDone('journal', entry.id)">
+                  {{ getCardTodoDoneLabel('journal', entry.id) }}
+                </small>
+              </div>
+              <div class="entry-body selectable-entry-body">
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
-                <p v-html="renderReminderHighlightedContent(entry.content, 'journal-entry', entry.id)"></p>
-              </button>
+                <p
+                  @click.stop="handleTodoContentClick"
+                  v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
+                ></p>
+              </div>
+
+              <div
+                v-if="getUnresolvedSentenceTodos('journal', entry.id, entry.content).length > 0"
+                class="todo-unresolved"
+              >
+                <span>
+                  有 {{ getUnresolvedSentenceTodos('journal', entry.id, entry.content).length }} 个待办无法定位
+                </span>
+                <button type="button" @click="showUnresolvedTodoOriginals('journal', entry.id, entry.content)">
+                  查看原文
+                </button>
+                <button type="button" @click="removeUnresolvedSentenceTodos('journal', entry.id, entry.content)">
+                  删除
+                </button>
+              </div>
 
               <div class="entry-footer">
                 <span class="entry-footnote">
@@ -2224,6 +3336,17 @@ onMounted(() => {
                   <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
                     提醒
                   </button>
+                  <button
+                    class="ghost-action reminder-action"
+                    type="button"
+                    @pointerdown="captureTodoSelectionFromWindow"
+                    @click="createJournalTodo(entry)"
+                  >
+                    待办
+                  </button>
+                  <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
+                    编辑
+                  </button>
                   <button class="delete-action" type="button" @click="removeEntry(entry)">
                     删除
                   </button>
@@ -2233,7 +3356,206 @@ onMounted(() => {
           </article>
         </section>
       </div>
+
+      <section
+        v-if="completedJournalEntryItems.length > 0"
+        class="completed-todo-group"
+      >
+        <button
+          class="completed-todo-heading"
+          type="button"
+          @click="journalCompletedOpen = !journalCompletedOpen"
+        >
+          <span>{{ journalCompletedOpen ? '▾' : '▸' }} 已完成</span>
+          <small>{{ completedJournalEntryItems.length }}</small>
+        </button>
+        <div v-if="journalCompletedOpen" class="completed-todo-actions">
+          <button class="delete-action" type="button" @click="clearJournalDoneCardTodos">
+            清空已完成
+          </button>
+        </div>
+        <div v-if="journalCompletedOpen" class="entry-groups">
+          <article
+            v-for="item in completedJournalEntryItems"
+            :key="item.todo.id"
+            class="entry-card is-todo-done"
+            :data-todo-source="`journal:${item.entry.id}`"
+            :data-todo-target="item.todo.id"
+          >
+            <div class="todo-card-strip is-done">
+              <button
+                class="todo-card-toggle is-done"
+                type="button"
+                @click="toggleTodoStatus(item.todo)"
+              >
+                {{ getTodoStatusIcon(item.todo) }}
+              </button>
+              <span>卡片待办</span>
+              <small>{{ formatTodoDateTime(item.todo.doneAt) }} 完成</small>
+            </div>
+            <div class="entry-body">
+              <span class="entry-time">
+                {{ getJournalEntryDateLabel(item.entry) }} · 创建 {{ formatEntryTime(item.entry.createdAt) }}
+              </span>
+              <strong>{{ item.entry.title }}</strong>
+              <p
+                @click.stop="handleTodoContentClick"
+                v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
+              ></p>
+            </div>
+          </article>
+        </div>
+      </section>
     </section>
+    </section>
+
+    <section
+      v-else-if="activePark === 'todo'"
+      class="todo-workspace"
+      aria-label="我的待办"
+    >
+      <section class="tool-card todo-home-card" aria-labelledby="todo-home-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Action from notes</p>
+            <h2 id="todo-home-title">我的待办</h2>
+          </div>
+          <span class="counter">{{ filteredOpenTodoItems.length }} 条</span>
+        </div>
+
+        <div class="todo-filter-group" aria-label="待办 Park 筛选">
+          <button
+            type="button"
+            :class="{ active: todoParkFilter === 'all' }"
+            @click="todoParkFilter = 'all'"
+          >
+            全部
+          </button>
+          <button
+            type="button"
+            :class="{ active: todoParkFilter === 'journal' }"
+            @click="todoParkFilter = 'journal'"
+          >
+            心记
+          </button>
+          <button
+            type="button"
+            :class="{ active: todoParkFilter === 'project' }"
+            @click="todoParkFilter = 'project'"
+          >
+            做记
+          </button>
+        </div>
+
+        <div class="todo-filter-group soft" aria-label="待办快捷筛选">
+          <button
+            type="button"
+            :class="{ active: todoQuickFilter === 'reminder' }"
+            @click="todoQuickFilter = 'reminder'"
+          >
+            开启提醒的
+          </button>
+          <button
+            type="button"
+            :class="{ active: todoQuickFilter === 'today' }"
+            @click="todoQuickFilter = 'today'"
+          >
+            今天
+          </button>
+          <button
+            type="button"
+            :class="{ active: todoQuickFilter === 'all' }"
+            @click="todoQuickFilter = 'all'"
+          >
+            全部
+          </button>
+        </div>
+
+        <div v-if="filteredOpenTodoItems.length === 0" class="empty-state">
+          <p>现在没有打开的待办。</p>
+          <span>在心记或做记里选中文字，再点“待办”，一句话就能变成行动。</span>
+        </div>
+
+        <div v-else class="todo-list">
+          <article
+            v-for="item in filteredOpenTodoItems"
+            :key="item.todo.id"
+            class="todo-list-item"
+            :data-todo-target="item.todo.id"
+          >
+            <button
+              class="todo-list-toggle"
+              type="button"
+              @click="toggleTodoStatus(item.todo)"
+            >
+              {{ getTodoStatusIcon(item.todo) }}
+            </button>
+            <button
+              class="todo-list-main"
+              type="button"
+              @click="focusTodoSource(item.todo)"
+            >
+              <strong>{{ item.content }}</strong>
+              <span>
+                来自：{{ item.sourceLabel }} · {{ getTodoTargetTypeLabel(item.todo.targetType) }}
+              </span>
+              <small>
+                {{ item.createdLabel }}
+                <i v-if="item.hasReminder">已关联提醒</i>
+              </small>
+            </button>
+          </article>
+        </div>
+
+        <section
+          v-if="filteredDoneTodoItems.length > 0"
+          class="completed-todo-group global"
+        >
+          <button
+            class="completed-todo-heading"
+            type="button"
+            @click="globalCompletedOpen = !globalCompletedOpen"
+          >
+            <span>{{ globalCompletedOpen ? '▾' : '▸' }} 已完成</span>
+            <small>{{ filteredDoneTodoItems.length }}</small>
+          </button>
+          <div v-if="globalCompletedOpen" class="completed-todo-actions">
+            <button class="delete-action" type="button" @click="clearGlobalDoneTodos">
+              清空已完成
+            </button>
+          </div>
+          <div v-if="globalCompletedOpen" class="todo-list">
+            <article
+              v-for="item in filteredDoneTodoItems"
+              :key="item.todo.id"
+              class="todo-list-item is-done"
+              :data-todo-target="item.todo.id"
+            >
+              <button
+                class="todo-list-toggle is-done"
+                type="button"
+                @click="toggleTodoStatus(item.todo)"
+              >
+                {{ getTodoStatusIcon(item.todo) }}
+              </button>
+              <button
+                class="todo-list-main"
+                type="button"
+                @click="focusTodoSource(item.todo)"
+              >
+                <strong>{{ item.content }}</strong>
+                <span>
+                  来自：{{ item.sourceLabel }} · {{ getTodoTargetTypeLabel(item.todo.targetType) }}
+                </span>
+                <small>
+                  {{ formatTodoDateTime(item.todo.doneAt) }} 完成
+                  <i v-if="item.todo.doneNote">{{ item.todo.doneNote }}</i>
+                </small>
+              </button>
+            </article>
+          </div>
+        </section>
+      </section>
     </section>
 
     <section
@@ -2766,36 +4088,93 @@ onMounted(() => {
             </button>
           </div>
 
-          <div v-else-if="activeLabRecords.length === 0" class="empty-state knowledge-empty-state">
+          <div
+            v-else-if="activeOpenLabRecords.length === 0 && activeCompletedLabRecordItems.length === 0"
+            class="empty-state knowledge-empty-state"
+          >
             <p>这个项目还没有记录。</p>
             <span>点右下角按钮，先补一条操作或复盘。</span>
           </div>
 
           <div v-else class="knowledge-note-items">
             <button
-              v-for="record in activeLabRecords"
+              v-for="record in activeOpenLabRecords"
               :key="record.id"
               type="button"
               class="lab-record-list-item"
               :class="[
                 { active: selectedLabRecordId === record.id },
+                { 'has-card-todo': Boolean(getCardTodo('project', record.id)) },
                 `is-${record.type}`,
               ]"
+              :data-todo-source="`project:${record.id}`"
               @click="selectLabRecord(record)"
             >
               <div class="lab-record-list-header">
                 <span class="entry-time">
                   {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
                 </span>
-                <span class="record-type-pill" :class="`is-${record.type}`">
-                  {{ getLabRecordTypeLabel(record.type) }}
-                </span>
+                <div class="lab-record-list-badges">
+                  <span
+                    v-if="getCardTodo('project', record.id)"
+                    class="todo-mini-badge"
+                  >
+                    {{ getCardTodoIcon('project', record.id) }}
+                  </span>
+                  <span class="record-type-pill" :class="`is-${record.type}`">
+                    {{ getLabRecordTypeLabel(record.type) }}
+                  </span>
+                </div>
               </div>
               <strong>{{ record.title }}</strong>
               <p>{{ record.content }}</p>
               <small v-if="record.tags.length > 0">{{ record.tags.join(' / ') }}</small>
             </button>
           </div>
+
+          <section
+            v-if="activeCompletedLabRecordItems.length > 0"
+            class="completed-todo-group"
+          >
+            <button
+              class="completed-todo-heading"
+              type="button"
+              @click="labCompletedOpen = !labCompletedOpen"
+            >
+              <span>{{ labCompletedOpen ? '▾' : '▸' }} 已完成</span>
+              <small>{{ activeCompletedLabRecordItems.length }}</small>
+            </button>
+            <div v-if="labCompletedOpen" class="completed-todo-actions">
+              <button class="delete-action" type="button" @click="clearLabDoneCardTodos">
+                清空已完成
+              </button>
+            </div>
+            <div v-if="labCompletedOpen" class="knowledge-note-items">
+              <button
+                v-for="item in activeCompletedLabRecordItems"
+                :key="item.todo.id"
+                type="button"
+                class="lab-record-list-item is-todo-done"
+                :class="`is-${item.record.type}`"
+                :data-todo-source="`project:${item.record.id}`"
+                :data-todo-target="item.todo.id"
+                @click="selectLabRecord(item.record)"
+              >
+                <div class="lab-record-list-header">
+                  <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
+                  <button
+                    class="todo-card-toggle is-done"
+                    type="button"
+                    @click.stop="toggleTodoStatus(item.todo)"
+                  >
+                    {{ getTodoStatusIcon(item.todo) }}
+                  </button>
+                </div>
+                <strong>{{ item.record.title }}</strong>
+                <p>{{ item.record.content }}</p>
+              </button>
+            </div>
+          </section>
 
           <button
             v-if="activeLabProject"
@@ -2960,24 +4339,78 @@ onMounted(() => {
             </div>
 
             <div
+              v-if="getCardTodo('project', selectedLabRecord.id)"
+              class="todo-card-strip"
+              :data-todo-target="getCardTodo('project', selectedLabRecord.id)?.id"
+            >
+              <button
+                class="todo-card-toggle"
+                type="button"
+                @click="toggleCardTodo('project', selectedLabRecord.id)"
+              >
+                {{ getCardTodoIcon('project', selectedLabRecord.id) }}
+              </button>
+              <span>卡片待办</span>
+              <small v-if="isCardTodoDone('project', selectedLabRecord.id)">
+                {{ getCardTodoDoneLabel('project', selectedLabRecord.id) }}
+              </small>
+            </div>
+
+            <div
               v-if="selectedLabRecord.tags.length > 0"
               class="tag-row knowledge-detail-tags"
             >
               <span v-for="tag in selectedLabRecord.tags" :key="tag">{{ tag }}</span>
             </div>
 
+            <label
+              v-if="getSentenceTodosForTarget('project', selectedLabRecord.id).some((todo) => todo.status === 'done')"
+              class="todo-hide-toggle"
+            >
+              <input v-model="hideDoneSentenceTodos" type="checkbox" />
+              <span>隐藏已完成的待办</span>
+            </label>
+
             <p
               class="knowledge-note-content"
               :data-reminder-target="`lab-record:${selectedLabRecord.id}`"
-              :class="{ 'has-reminder-target': isReminderHighlighted('lab-record', selectedLabRecord.id) }"
-              v-html="renderReminderHighlightedContent(selectedLabRecord.content, 'lab-record', selectedLabRecord.id)"
+              :data-todo-source="`project:${selectedLabRecord.id}`"
+              :class="{
+                'has-reminder-target': isReminderHighlighted('lab-record', selectedLabRecord.id),
+                'has-todo-target': isCardTodoHighlighted('project', selectedLabRecord.id),
+              }"
+              @click="handleTodoContentClick"
+              v-html="renderTodoContent(selectedLabRecord.content, 'project', selectedLabRecord.id, 'lab-record')"
             ></p>
+
+            <div
+              v-if="getUnresolvedSentenceTodos('project', selectedLabRecord.id, selectedLabRecord.content).length > 0"
+              class="todo-unresolved"
+            >
+              <span>
+                有 {{ getUnresolvedSentenceTodos('project', selectedLabRecord.id, selectedLabRecord.content).length }} 个待办无法定位
+              </span>
+              <button type="button" @click="showUnresolvedTodoOriginals('project', selectedLabRecord.id, selectedLabRecord.content)">
+                查看原文
+              </button>
+              <button type="button" @click="removeUnresolvedSentenceTodos('project', selectedLabRecord.id, selectedLabRecord.content)">
+                删除
+              </button>
+            </div>
 
             <div class="entry-actions knowledge-detail-actions">
               <button class="delete-action" type="button" @click="removeLabRecord(selectedLabRecord)">
                 删除
               </button>
               <div class="knowledge-inline-actions">
+                <button
+                  class="ghost-action"
+                  type="button"
+                  @pointerdown="captureTodoSelectionFromWindow"
+                  @click="createLabTodo(selectedLabRecord)"
+                >
+                  待办
+                </button>
                 <button class="ghost-action" type="button" @click="openLabReminderComposer(selectedLabRecord)">
                   提醒
                 </button>
@@ -3191,6 +4624,38 @@ onMounted(() => {
           </button>
         </div>
       </section>
+    </div>
+
+    <div
+      v-if="todoCompletionDraft"
+      class="todo-completion-sheet"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="todo-completion-title"
+    >
+      <div class="todo-completion-card">
+        <div>
+          <p class="eyebrow">完成啦</p>
+          <h2 id="todo-completion-title">加个完成备注？</h2>
+        </div>
+        <input
+          v-model="todoCompletionNote"
+          type="text"
+          maxlength="80"
+          placeholder="可选，例如：已测试通过"
+          @input="keepTodoCompletionPanelOpen"
+          @focus="keepTodoCompletionPanelOpen"
+        />
+        <p>{{ resolveTodoSource(todoCompletionDraft).content }}</p>
+        <div class="todo-completion-actions">
+          <button class="ghost-action" type="button" @click="closeTodoCompletionDraft">
+            跳过
+          </button>
+          <button class="primary-action small" type="button" @click="saveTodoCompletionNote">
+            完成
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="agent-layer">

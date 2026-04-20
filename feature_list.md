@@ -167,6 +167,9 @@ Codex 会优先读取这些任务卡：
 | `TASK-026` | `planned` | 笔记与做记多分支层级：知识库和做记项目内部支持最多 4 层分支树，用于组织主题、章节、模块或阶段 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-027` | `done` | 系统提醒与句子级定时提醒：为某条记录或记录中的某句话设置系统定时提醒，点击后回到对应位置 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-028` | `done` | 日记未来日期编辑：心记可以指定记录归属日期，并在未来任意日期下新增或编辑日记 | `cd journal-agent && npm run build && npx cap sync ios` |
+| `TASK-029` | `done` | Todo 句子锚点底层服务：为句子级待办提供创建、解析和模糊定位能力 | `cd journal-agent && npm run build` |
+| `TASK-030` | `done` | Todo 基础能力：心记和做记支持卡片级、句子级待办，完成后折叠到已完成分组 | `cd journal-agent && npm run build` |
+| `TASK-031` | `done` | 全局我的待办视图：跨心记和做记汇总打开与已完成的待办，并可跳回来源 | `cd journal-agent && npm run build && npx cap sync ios` |
 | `TASK-021` | `planned` | 多类型资料检索与 Agent 读取：让搜索和 Agent 能理解日志、知识库、实验、项目等不同记录来源 | `cd journal-agent && npm run build && npm run test:agent-api` |
 | `TASK-023` | `planned` | 共同 Workspace 与权限控制：支持邀请他人加入共享 workspace，并只允许有权限的成员操作其中内容 | `cd journal-agent && npm run build` |
 | `TASK-024` | `done` | Agent 三记写入工具：允许 Agent 在受限协议下新增或编辑心记、笔记和做记记录，但不提供删除能力 | `cd journal-agent && npm run build && npm run test:agent-api` |
@@ -642,6 +645,52 @@ Codex 会优先读取这些任务卡：
 - `npm run build` 通过。
 - `npx cap sync ios` 通过。
 
+### F033：Todo 标记与已完成折叠分组
+
+状态：`done`
+
+心记和做记里的任意卡片或选中文字都可以标记为待办。待办不是独立清单，而是从记录中自然长出的行动项：卡片级 Todo 完成后折叠进“已完成”分组，句子级 Todo 保持在原文位置淡化和删除线显示，原始正文不被修改。
+
+第一版采用方案 A：已完成卡片进入折叠分组。受 WebView 能力限制，暂不改写 iOS 系统选中文字菜单，实际入口是“先选中文字，再点击 App 内的待办按钮”。
+
+验收标准：
+
+- 心记和做记两个 Park 的记录卡片都支持标记为卡片级待办。
+- 用户选中正文中的任意一段文字后，可以通过 App 内待办按钮创建句子级待办。
+- 卡片级 Todo 勾选后卡片淡化，并折叠到对应列表底部的已完成分组。
+- 句子级 Todo 勾选后原地淡化、加删除线，不改动原始正文内容。
+- 完成时可选填写一句完成备注；2 秒不操作会自动跳过备注面板。
+- 完成状态可取消，取消后恢复 open 并清空 `doneAt / doneNote`。
+- 心记时间线、心记日期列表和做记项目列表底部存在已完成折叠分组，默认折叠。
+- 已完成分组提供清空已完成入口，并带二次确认。
+- 存在全局“我的待办”顶层入口，跨心记和做记汇总所有 open 状态 Todo。
+- 全局视图支持全部 / 心记 / 做记分段筛选，以及开启提醒的 / 今天 / 全部快捷筛选。
+- 从全局视图点击任意 Todo 能跳回源记录，并尽量定位到对应句子。
+- 源记录被删除时，它的所有 Todo 会级联删除。
+- Todo 数据使用独立 localStorage key：`journal-agent.todos.v1`。
+- 句子定位使用锚点解析和轻量模糊匹配；定位失败时 UI 降级为查看原文和删除该 Todo。
+- 支持 `prefers-reduced-motion`，减少动态效果时动画降级。
+
+实现拆分：
+
+- `TASK-029`：句子锚点底层服务，提供 `createAnchor / resolveAnchor`。
+- `TASK-030`：Todo 基础能力，包含卡片级、句子级、完成备注、折叠已完成和级联删除。
+- `TASK-031`：全局“我的待办”视图，包含筛选、跳转和已完成汇总。
+
+明确不做：
+
+- 不做三态或多态 Todo。
+- 不做 Todo 层级嵌套。
+- 不做自定义颜色、分类或标签。
+- 不做拖拽排序。
+- 不做跨记录依赖关系。
+- 不做分享或协作。
+
+验证结果：
+
+- `npm run build` 通过。
+- `npx cap sync ios` 通过。
+
 ### F025：多类型资料检索与 Agent 读取
 
 状态：`planned`
@@ -696,6 +745,6 @@ Codex 会优先读取这些任务卡：
 
 ## 下一步建议
 
-知识库抽屉导航、做记 Park 项目记录、Agent 代写三记、系统提醒和日记未来日期编辑都已经可用。下一步可以回到 `TASK-005 / F005：草稿自动保存`，或者继续补 `F023：实验进度记录`。
+知识库抽屉导航、做记 Park 项目记录、Agent 代写三记、系统提醒、日记未来日期编辑和 Todo 标记都已经可用。下一步可以回到 `TASK-005 / F005：草稿自动保存`，或者继续补 `F023：实验进度记录`。
 
 计划区仍然作为后续 Park 保留在路线图里。

@@ -582,6 +582,76 @@
       "notes": "已完成。第一版仅支持心记 Park，不扩展到笔记或做记；记录日期 entryDate 用 YYYY-MM-DD 保存，旧数据读取时自动补齐。验证通过：npm run build，npx cap sync ios。"
     },
     {
+      "id": "TASK-029",
+      "featureId": "F033",
+      "category": "feature",
+      "description": "Todo 句子锚点底层服务：为句子级待办提供创建、解析和模糊定位能力",
+      "status": "done",
+      "priority": 14,
+      "dependsOn": [
+        "F021",
+        "F024"
+      ],
+      "steps": [
+        "新增 createAnchor / resolveAnchor 工具函数",
+        "选中文字时保存原文和大致字符偏移",
+        "定位时先做原位置附近精确匹配，再做全文精确匹配",
+        "精确匹配失败时使用 Levenshtein 相似度进行轻量模糊匹配",
+        "定位失败时返回 found=false，由 UI 降级展示原文"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "已完成。新增 src/utils/textAnchor.ts，当前给 Todo 使用，后续提醒、批注也可以复用。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "TASK-030",
+      "featureId": "F033",
+      "category": "feature",
+      "description": "Todo 基础能力：心记和做记支持卡片级、句子级待办，完成后折叠到已完成分组",
+      "status": "done",
+      "priority": 15,
+      "dependsOn": [
+        "TASK-029",
+        "F002",
+        "F024"
+      ],
+      "steps": [
+        "新增独立 todoStore，使用 journal-agent.todos.v1 保存 TodoMark[]",
+        "心记卡片和做记记录支持标记为卡片级待办",
+        "选中正文片段后点击待办按钮，可创建句子级待办",
+        "点击圆圈或方框可完成待办，完成时弹出可跳过的完成备注面板",
+        "再次点击已完成图标可确认取消完成，并清空 doneAt / doneNote",
+        "卡片级待办完成后从主列表淡化并进入已完成折叠分组",
+        "句子级待办完成后原地删除线淡化，不修改原始正文",
+        "记录删除时级联删除其 Todo"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "已完成。第一版无法直接扩展 iOS 系统选中文字菜单，因此采用“先选中文字，再点 App 内待办按钮”的入口；数据不嵌入心记或做记原记录。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "TASK-031",
+      "featureId": "F033",
+      "category": "feature",
+      "description": "全局我的待办视图：跨心记和做记汇总打开与已完成的待办，并可跳回来源",
+      "status": "done",
+      "priority": 16,
+      "dependsOn": [
+        "TASK-030"
+      ],
+      "steps": [
+        "在顶层 Park 切换器中新增 ✓ 待办入口",
+        "全局待办视图汇总心记和做记的 open 状态 Todo",
+        "支持全部 / 心记 / 做记分段筛选",
+        "支持开启提醒的、今天、全部快捷筛选",
+        "点击任意 Todo 可跳回源记录，并尽量定位到句子级待办位置",
+        "底部提供已完成折叠分组，并支持清空当前筛选下的已完成 Todo"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。提醒筛选会识别 Todo 自带 reminderId 或同一来源记录上的活跃提醒；跳转到句子级 Todo 时使用锚点渲染高亮。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
       "id": "TASK-021",
       "featureId": "F025",
       "category": "feature",
@@ -1255,6 +1325,41 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。entryDate 使用本地 YYYY-MM-DD 日期键，createdAt 继续表示真实创建时间，updatedAt 继续表示真实修改时间。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F033",
+      "title": "Todo 标记与已完成折叠分组",
+      "status": "done",
+      "priority": 14,
+      "phase": "M2-local-journal",
+      "summary": "心记和做记里的任意卡片或选中文字都可以标记为待办；完成后卡片级 Todo 折叠到已完成分组，句子级 Todo 原地淡化，并提供跨 Park 的“我的待办”视图。",
+      "dependsOn": [
+        "F002",
+        "F021",
+        "F024"
+      ],
+      "acceptanceCriteria": [
+        "心记和做记两个 Park 的记录卡片都支持标记为卡片级待办。",
+        "用户选中正文中的任意一段文字后，可以通过 App 内待办按钮创建句子级待办。",
+        "卡片级 Todo 勾选后卡片淡化，并折叠到对应列表底部的已完成分组。",
+        "句子级 Todo 勾选后原地淡化、加删除线，不改动原始正文内容。",
+        "完成时可选填写一句完成备注；2 秒不操作会自动跳过备注面板。",
+        "完成状态可取消，取消后恢复 open 并清空 doneAt / doneNote。",
+        "心记时间线、心记日期列表和做记项目列表底部存在已完成折叠分组，默认折叠。",
+        "已完成分组提供清空已完成入口，并带二次确认。",
+        "存在全局“我的待办”顶层入口，跨心记和做记汇总所有 open 状态 Todo。",
+        "全局视图支持全部 / 心记 / 做记分段筛选，以及开启提醒的 / 今天 / 全部快捷筛选。",
+        "从全局视图点击任意 Todo 能跳回源记录，并尽量定位到对应句子。",
+        "源记录被删除时，它的所有 Todo 会级联删除。",
+        "Todo 数据使用独立 localStorage key：journal-agent.todos.v1。",
+        "句子定位使用锚点解析和轻量模糊匹配；定位失败时 UI 降级为查看原文和删除该 Todo。",
+        "支持 prefers-reduced-motion，减少动态效果时动画降级。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。受 WebView 能力限制，第一版不改写 iOS 系统选中文字菜单，采用“选中文字后点击 App 内待办按钮”的交互；其余数据结构、折叠已完成、完成备注和全局待办视图均已落地。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "F025",
