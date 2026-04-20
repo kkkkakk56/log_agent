@@ -337,6 +337,7 @@ const highlightedReminderTarget = ref<{
   quote: string;
 } | null>(null);
 const highlightedTodoId = ref<string | null>(null);
+const expandedJournalEntryIds = ref<Set<string>>(new Set());
 const todoStatusMessage = ref('');
 const todoCompletionDraft = ref<TodoMark | null>(null);
 const todoCompletionNote = ref('');
@@ -1590,6 +1591,51 @@ function formatClockTimeLabel(hour: number, minute: number): string {
   return `${hour.toString().padStart(2, '0')}:${minute
     .toString()
     .padStart(2, '0')}`;
+}
+
+function hasActiveTextSelection(): boolean {
+  const selection = window.getSelection();
+
+  return Boolean(selection && selection.toString().trim().length > 0);
+}
+
+function isJournalEntryExpanded(entryId: string): boolean {
+  return expandedJournalEntryIds.value.has(entryId);
+}
+
+function setJournalEntryExpanded(entryId: string, expanded: boolean) {
+  const nextExpandedIds = new Set(expandedJournalEntryIds.value);
+
+  if (expanded) {
+    nextExpandedIds.add(entryId);
+  } else {
+    nextExpandedIds.delete(entryId);
+  }
+
+  expandedJournalEntryIds.value = nextExpandedIds;
+}
+
+function toggleJournalEntryExpanded(entryId: string) {
+  if (hasActiveTextSelection()) {
+    return;
+  }
+
+  setJournalEntryExpanded(entryId, !isJournalEntryExpanded(entryId));
+}
+
+function handleJournalEntryContentClick(entryId: string, event: MouseEvent) {
+  const target = event.target;
+
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.closest('[data-todo-expand], [data-todo-id]')) {
+    handleTodoContentClick(event);
+    return;
+  }
+
+  toggleJournalEntryExpanded(entryId);
 }
 
 function isJournalDateKey(value: string): boolean {
@@ -3296,6 +3342,7 @@ function saveDraft() {
 }
 
 function startEditing(entry: JournalEntry) {
+  setJournalEntryExpanded(entry.id, false);
   editingId.value = entry.id;
   editingContent.value = entry.content;
   editingEntryDate.value = getJournalEntryDateKey(entry);
@@ -3337,6 +3384,7 @@ function removeEntry(entry: JournalEntry) {
   }
 
   deleteEntry(entry.id);
+  setJournalEntryExpanded(entry.id, false);
   void cancelTargetReminders('journal-entry', entry.id);
   deleteTodosForNote('journal', entry.id);
 
@@ -3904,6 +3952,7 @@ onBeforeUnmount(() => {
           :data-reminder-target="`journal-entry:${entry.id}`"
           :data-todo-source="`journal:${entry.id}`"
           :class="{
+            'is-expanded': isJournalEntryExpanded(entry.id),
             'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
             'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
           }"
@@ -3950,13 +3999,16 @@ onBeforeUnmount(() => {
                 {{ getCardTodoDoneLabel('journal', entry.id) }}
               </small>
             </div>
-            <div class="entry-body selectable-entry-body">
+            <div
+              class="entry-body selectable-entry-body"
+              @click="toggleJournalEntryExpanded(entry.id)"
+            >
               <span class="entry-time">
                 {{ getJournalEntryDateLabel(entry) }} · 创建 {{ formatEntryTime(entry.createdAt) }}
               </span>
               <strong>{{ entry.title }}</strong>
               <p
-                @click.stop="handleTodoContentClick"
+                @click.stop="handleJournalEntryContentClick(entry.id, $event)"
                 v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
               ></p>
             </div>
@@ -4080,17 +4132,18 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else class="entry-groups">
-          <article
-            v-for="entry in selectedDateEntries"
-            :key="entry.id"
-            class="entry-card"
-            :data-reminder-target="`journal-entry:${entry.id}`"
-            :data-todo-source="`journal:${entry.id}`"
-            :class="{
-              'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
-              'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
-            }"
-          >
+        <article
+          v-for="entry in selectedDateEntries"
+          :key="entry.id"
+          class="entry-card"
+          :data-reminder-target="`journal-entry:${entry.id}`"
+          :data-todo-source="`journal:${entry.id}`"
+          :class="{
+            'is-expanded': isJournalEntryExpanded(entry.id),
+            'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
+            'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
+          }"
+        >
             <template v-if="editingId === entry.id">
               <label class="journal-date-field compact">
                 <span>归属日期</span>
@@ -4133,11 +4186,14 @@ onBeforeUnmount(() => {
                   {{ getCardTodoDoneLabel('journal', entry.id) }}
                 </small>
               </div>
-              <div class="entry-body selectable-entry-body">
+              <div
+                class="entry-body selectable-entry-body"
+                @click="toggleJournalEntryExpanded(entry.id)"
+              >
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
                 <p
-                  @click.stop="handleTodoContentClick"
+                  @click.stop="handleJournalEntryContentClick(entry.id, $event)"
                   v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
                 ></p>
               </div>
@@ -4206,13 +4262,14 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <div v-if="selectedDateCompletedOpen" class="entry-groups">
-            <article
-              v-for="item in selectedDateCompletedEntryItems"
-              :key="item.todo.id"
-              class="entry-card is-todo-done"
-              :data-todo-source="`journal:${item.entry.id}`"
-              :data-todo-target="item.todo.id"
-            >
+          <article
+            v-for="item in selectedDateCompletedEntryItems"
+            :key="item.todo.id"
+            class="entry-card is-todo-done"
+            :data-todo-source="`journal:${item.entry.id}`"
+            :data-todo-target="item.todo.id"
+            :class="{ 'is-expanded': isJournalEntryExpanded(item.entry.id) }"
+          >
               <div class="todo-card-strip is-done">
                 <button
                   class="todo-card-toggle is-done"
@@ -4224,11 +4281,14 @@ onBeforeUnmount(() => {
                 <span>卡片待办</span>
                 <small>{{ formatTodoDateTime(item.todo.doneAt) }} 完成</small>
               </div>
-              <div class="entry-body">
+              <div
+                class="entry-body selectable-entry-body"
+                @click="toggleJournalEntryExpanded(item.entry.id)"
+              >
                 <span class="entry-time">创建 {{ formatEntryTime(item.entry.createdAt) }}</span>
                 <strong>{{ item.entry.title }}</strong>
                 <p
-                  @click.stop="handleTodoContentClick"
+                  @click.stop="handleJournalEntryContentClick(item.entry.id, $event)"
                   v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
                 ></p>
               </div>
@@ -4265,6 +4325,7 @@ onBeforeUnmount(() => {
             :data-reminder-target="`journal-entry:${entry.id}`"
             :data-todo-source="`journal:${entry.id}`"
             :class="{
+              'is-expanded': isJournalEntryExpanded(entry.id),
               'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
               'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
             }"
@@ -4311,11 +4372,14 @@ onBeforeUnmount(() => {
                   {{ getCardTodoDoneLabel('journal', entry.id) }}
                 </small>
               </div>
-              <div class="entry-body selectable-entry-body">
+              <div
+                class="entry-body selectable-entry-body"
+                @click="toggleJournalEntryExpanded(entry.id)"
+              >
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <strong>{{ entry.title }}</strong>
                 <p
-                  @click.stop="handleTodoContentClick"
+                  @click.stop="handleJournalEntryContentClick(entry.id, $event)"
                   v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
                 ></p>
               </div>
@@ -4391,6 +4455,7 @@ onBeforeUnmount(() => {
             class="entry-card is-todo-done"
             :data-todo-source="`journal:${item.entry.id}`"
             :data-todo-target="item.todo.id"
+            :class="{ 'is-expanded': isJournalEntryExpanded(item.entry.id) }"
           >
             <div class="todo-card-strip is-done">
               <button
@@ -4403,13 +4468,16 @@ onBeforeUnmount(() => {
               <span>卡片待办</span>
               <small>{{ formatTodoDateTime(item.todo.doneAt) }} 完成</small>
             </div>
-            <div class="entry-body">
+            <div
+              class="entry-body selectable-entry-body"
+              @click="toggleJournalEntryExpanded(item.entry.id)"
+            >
               <span class="entry-time">
                 {{ getJournalEntryDateLabel(item.entry) }} · 创建 {{ formatEntryTime(item.entry.createdAt) }}
               </span>
               <strong>{{ item.entry.title }}</strong>
               <p
-                @click.stop="handleTodoContentClick"
+                @click.stop="handleJournalEntryContentClick(item.entry.id, $event)"
                 v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
               ></p>
             </div>

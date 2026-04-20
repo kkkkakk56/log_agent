@@ -695,6 +695,28 @@
       "notes": "已完成。计划区新增每日记录提醒卡片，默认开启 23:00 系统通知；点击通知会跳回心记记录入口。验证通过：npm run build，npx cap sync ios。"
     },
     {
+      "id": "TASK-034",
+      "featureId": "F036",
+      "category": "feature",
+      "description": "心记卡片点按展开详情：点击记录卡片可展开完整正文，再点一次恢复摘要，并带轻微缓冲动画",
+      "status": "done",
+      "priority": 19,
+      "dependsOn": [
+        "F002",
+        "F013"
+      ],
+      "steps": [
+        "时间线、搜索结果、日历选中日里的心记卡片统一支持点击展开全文",
+        "再次点击同一张卡片时恢复为摘要形态",
+        "展开和收起不影响编辑、提醒、待办、删除等底部操作按钮",
+        "句子级待办的点击、展开隐藏待办和正文选中文字行为继续可用",
+        "展开时增加轻微缓冲动画，让卡片和正文高度变化更自然"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。心记卡片正文默认收起为摘要，高度通过缓动过渡展开；展开状态在时间线、搜索和日历三处共用同一套交互。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
       "id": "TASK-021",
       "featureId": "F025",
       "category": "feature",
@@ -1450,6 +1472,30 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。提醒设置存储在 journal-agent.daily-journal-reminder.v1；计划区新增每日提醒卡片，通知点击后会直接聚焦到心记记录入口。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F036",
+      "title": "心记卡片点按展开详情",
+      "status": "done",
+      "priority": 19,
+      "phase": "M2-local-journal",
+      "summary": "时间线、搜索和日历里的心记卡片默认展示摘要；点击卡片正文可展开完整内容，再次点击则恢复摘要，并带轻微缓冲动画。",
+      "dependsOn": [
+        "F002",
+        "F013"
+      ],
+      "acceptanceCriteria": [
+        "时间线、搜索结果和日历选中日中的心记卡片都支持点按展开全文。",
+        "再次点击同一张心记卡片时，会恢复为默认摘要形态。",
+        "展开和收起不影响提醒、待办、编辑、删除等操作按钮使用。",
+        "句子级待办点击和正文选中文字行为继续可用，不因为展开交互失效。",
+        "展开时卡片和正文高度变化具有明显但克制的缓冲动画。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。当前实现为每条心记独立保存展开状态，正文默认折叠为摘要，通过 max-height 和卡片位移动画做缓冲过渡。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "F025",
