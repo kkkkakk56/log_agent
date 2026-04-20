@@ -1099,6 +1099,48 @@ function getTodoSelectedAnchor(target: TodoTargetDraft) {
   );
 }
 
+function getMatchingSentenceTodo(
+  parkType: TodoParkType,
+  noteId: string,
+  anchor: TextAnchor,
+): TodoMark | null {
+  const sentenceTodos = getSentenceTodosForTarget(parkType, noteId);
+
+  return (
+    sentenceTodos.find(
+      (todo) =>
+        todo.sentenceText === anchor.sentenceText &&
+        todo.sentenceApproxOffset === anchor.sentenceApproxOffset,
+    ) ??
+    sentenceTodos.find((todo) => todo.sentenceText === anchor.sentenceText) ??
+    null
+  );
+}
+
+function removeTodoMark(todo: TodoMark, message: string): boolean {
+  const didDelete = deleteTodo(todo.id);
+
+  if (!didDelete) {
+    return false;
+  }
+
+  if (highlightedTodoId.value === todo.id) {
+    highlightedTodoId.value = null;
+  }
+
+  if (todoCompletionDraft.value?.id === todo.id) {
+    closeTodoCompletionDraft();
+  }
+
+  expandedHiddenTodoIds.value = new Set(
+    [...expandedHiddenTodoIds.value].filter((todoId) => todoId !== todo.id),
+  );
+  refreshTodos();
+  todoStatusMessage.value = message;
+
+  return true;
+}
+
 function createTodoForTarget(target: TodoTargetDraft) {
   const selectedAnchor = getTodoSelectedAnchor(target);
   const existingCardTodo = getCardTodo(target.parkType, target.noteId);
@@ -1106,14 +1148,23 @@ function createTodoForTarget(target: TodoTargetDraft) {
 
   if (selectedAnchor) {
     cachedTodoSelection.value = null;
-    const existingSentenceTodo = getSentenceTodosForTarget(
+    const existingSentenceTodo = getMatchingSentenceTodo(
       target.parkType,
       target.noteId,
-    ).find((item) => item.sentenceText === selectedAnchor.sentenceText);
+      selectedAnchor,
+    );
 
     if (existingSentenceTodo) {
+      if (existingSentenceTodo.status === 'open') {
+        if (!removeTodoMark(existingSentenceTodo, '已取消这段文字的待办。')) {
+          todoStatusMessage.value = '待办取消失败，请稍后再试。';
+        }
+
+        return;
+      }
+
       highlightedTodoId.value = existingSentenceTodo.id;
-      todoStatusMessage.value = '这段文字已经是待办了。';
+      todoStatusMessage.value = '这段文字已在已完成待办里，可点击方框恢复为待办。';
       return;
     }
 
@@ -1125,11 +1176,21 @@ function createTodoForTarget(target: TodoTargetDraft) {
       sentenceApproxOffset: selectedAnchor.sentenceApproxOffset,
     });
   } else if (existingCardTodo) {
+    if (existingCardTodo.status === 'open') {
+      if (
+        !removeTodoMark(
+          existingCardTodo,
+          `已取消「${target.title || '这张卡片'}」待办。`,
+        )
+      ) {
+        todoStatusMessage.value = '待办取消失败，请稍后再试。';
+      }
+
+      return;
+    }
+
     highlightedTodoId.value = existingCardTodo.id;
-    todoStatusMessage.value =
-      existingCardTodo.status === 'done'
-        ? '这张卡片已在已完成待办里，可点击圆点恢复为待办。'
-        : '这张卡片已经是待办了。';
+    todoStatusMessage.value = '这张卡片已在已完成待办里，可点击圆点恢复为待办。';
     return;
   } else {
     todo = createTodo({
