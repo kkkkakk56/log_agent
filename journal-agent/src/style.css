@@ -1848,6 +1848,37 @@ a { color: var(--accent); text-decoration: none; }
   color: var(--ink-1);
 }
 .park-boundary-list span { font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+.daily-reminder-card {
+  margin-top: 4px;
+}
+.daily-reminder-copy {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.daily-reminder-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--ink-4);
+  font-size: 12px;
+}
+.daily-reminder-meta span {
+  padding: 6px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-pill);
+}
+.daily-reminder-status {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 1.5;
+}
 
 /* ---------- 15. Agent (浮动窗口) ---------- */
 .agent-layer {

@@ -673,6 +673,28 @@
       "notes": "已完成。使用 journal-agent.agent.fab-position.v1 保存浮钮坐标；拖动超过阈值才移动，避免和点击打开 Agent 冲突。验证通过：npm run build，npx cap sync ios。"
     },
     {
+      "id": "TASK-033",
+      "featureId": "F035",
+      "category": "feature",
+      "description": "每日 23:00 记录提醒：新增固定系统通知，支持一键开关并可从通知直达心记记录入口",
+      "status": "done",
+      "priority": 18,
+      "dependsOn": [
+        "F031"
+      ],
+      "steps": [
+        "新增独立的每日提醒本地设置，至少保存启用状态和提醒时间",
+        "默认开启每天 23:00 的系统通知，避免用户每次手动创建一次性提醒",
+        "在计划区提供清晰的开启 / 关闭入口和当前状态文案",
+        "点击每日提醒通知后回到心记记录入口，方便立即补记",
+        "App 启动时如果该提醒处于启用状态，就重新向系统同步调度",
+        "浏览器预览保持友好降级，真机同步后使用系统通知"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。计划区新增每日记录提醒卡片，默认开启 23:00 系统通知；点击通知会跳回心记记录入口。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
       "id": "TASK-021",
       "featureId": "F025",
       "category": "feature",
@@ -1405,6 +1427,29 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。位置使用 journal-agent.agent.fab-position.v1 持久化；拖动阈值用于区分点击和移动。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F035",
+      "title": "每日 23:00 记录提醒",
+      "status": "done",
+      "priority": 18,
+      "phase": "M2-local-journal",
+      "summary": "新增一个固定的每日系统提醒，在晚上 23:00 提醒用户回来记录今天，并允许从通知直接回到心记输入入口。",
+      "dependsOn": [
+        "F031"
+      ],
+      "acceptanceCriteria": [
+        "App 内存在一个清晰的每日记录提醒入口，可以看到当前是否启用。",
+        "首次使用时默认开启每天 23:00 的系统通知提醒。",
+        "用户可以一键关闭或重新开启这个固定提醒。",
+        "点击每日提醒通知后，App 会打开心记并滚动到记录输入入口。",
+        "浏览器预览下会显示降级提示，真机同步后使用系统通知。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。提醒设置存储在 journal-agent.daily-journal-reminder.v1；计划区新增每日提醒卡片，通知点击后会直接聚焦到心记记录入口。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "F025",

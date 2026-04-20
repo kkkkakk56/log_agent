@@ -12,6 +12,7 @@ import type { RecordBranch } from './types/branch';
 import type { JournalEntry } from './types/journal';
 import type { KnowledgeBase, KnowledgeNote } from './types/knowledge';
 import type { LabProject, LabRecord, LabRecordType } from './types/lab';
+import type { DailyJournalReminderSettings } from './types/dailyReminder';
 import type { RecordReminder, ReminderTargetType } from './types/reminder';
 import type { TodoMark, TodoParkType, TodoTargetType } from './types/todo';
 import {
@@ -40,6 +41,10 @@ import {
   getReminderById,
   updateReminder,
 } from './storage/reminderStore';
+import {
+  getDailyJournalReminderSettings,
+  setDailyJournalReminderEnabled,
+} from './storage/dailyReminderStore';
 import {
   completeTodo,
   createTodo,
@@ -88,8 +93,10 @@ import {
   updateLabRecord,
 } from './storage/labStore';
 import {
+  cancelDailyJournalReminderNotification,
   cancelReminderNotification,
   listenForReminderNotificationActions,
+  scheduleDailyJournalReminderNotification,
   scheduleReminderNotification,
 } from './services/reminderNotifications';
 import { createAnchor, resolveAnchor, type TextAnchor } from './utils/textAnchor';
@@ -224,6 +231,9 @@ const labProjects = ref<LabProject[]>(getLabProjects());
 const labRecords = ref<LabRecord[]>(getLabRecords());
 const recordBranches = ref<RecordBranch[]>(getRecordBranches({ includeArchived: true }));
 const reminders = ref<RecordReminder[]>(getActiveReminders());
+const dailyJournalReminder = ref<DailyJournalReminderSettings>(
+  getDailyJournalReminderSettings(),
+);
 const todos = ref<TodoMark[]>(getTodos());
 const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
@@ -319,6 +329,8 @@ const reminderQuote = ref('');
 const reminderError = ref('');
 const reminderStatusMessage = ref('');
 const reminderIsSaving = ref(false);
+const dailyJournalReminderStatusMessage = ref('');
+const dailyJournalReminderIsSaving = ref(false);
 const highlightedReminderTarget = ref<{
   targetType: ReminderTargetType;
   targetId: string;
@@ -726,6 +738,12 @@ const filteredDoneTodoItems = computed(() =>
 const reminderMinDateTime = computed(() =>
   toDateTimeLocalInputValue(new Date(Date.now() + 60_000)),
 );
+const dailyJournalReminderTimeLabel = computed(() =>
+  formatClockTimeLabel(
+    dailyJournalReminder.value.hour,
+    dailyJournalReminder.value.minute,
+  ),
+);
 const canSaveReminder = computed(() => {
   const scheduledAt = new Date(reminderScheduledAt.value);
 
@@ -781,6 +799,10 @@ function refreshEntries() {
 
 function refreshReminders() {
   reminders.value = getActiveReminders();
+}
+
+function refreshDailyJournalReminder() {
+  dailyJournalReminder.value = getDailyJournalReminderSettings();
 }
 
 function refreshTodos() {
@@ -1564,6 +1586,12 @@ function toDateTimeLocalInputValue(date: Date): string {
   return localDate.toISOString().slice(0, 16);
 }
 
+function formatClockTimeLabel(hour: number, minute: number): string {
+  return `${hour.toString().padStart(2, '0')}:${minute
+    .toString()
+    .padStart(2, '0')}`;
+}
+
 function isJournalDateKey(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(
     new Date(`${value}T00:00:00`).getTime(),
@@ -1598,16 +1626,38 @@ function composeForSelectedDate() {
   useSelectedDateForDraft();
   activeView.value = 'timeline';
   cancelEditing();
+  focusJournalComposer();
+}
+
+function getDefaultReminderDateTime(): string {
+  return toDateTimeLocalInputValue(new Date(Date.now() + 60 * 60_000));
+}
+
+function focusJournalComposer() {
   void nextTick(() => {
     document.querySelector('.compose-card')?.scrollIntoView({
       behavior: 'smooth',
       block: 'start',
     });
+
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLTextAreaElement>('.compose-card .journal-input')
+        ?.focus();
+    }, 120);
   });
 }
 
-function getDefaultReminderDateTime(): string {
-  return toDateTimeLocalInputValue(new Date(Date.now() + 60 * 60_000));
+function openDailyJournalReminderComposer() {
+  const today = getLocalDateKey(new Date());
+
+  activePark.value = 'journal';
+  selectedDateKey.value = today;
+  draftEntryDate.value = today;
+  activeView.value = 'timeline';
+  cancelEditing();
+  focusJournalComposer();
+  dailyJournalReminderStatusMessage.value = '已经把你带回今晚的记录入口。';
 }
 
 function getTargetTypeLabel(targetType: ReminderTargetType): string {
@@ -1754,6 +1804,79 @@ function saveReminder() {
   closeReminderComposer();
   reminderIsSaving.value = false;
   scheduleSavedReminder(reminder);
+}
+
+async function enableDailyJournalReminder() {
+  if (dailyJournalReminderIsSaving.value) {
+    return;
+  }
+
+  dailyJournalReminderIsSaving.value = true;
+  dailyJournalReminderStatusMessage.value = '正在开启每日提醒...';
+
+  const scheduleResult = await scheduleDailyJournalReminderNotification(
+    dailyJournalReminder.value.hour,
+    dailyJournalReminder.value.minute,
+  );
+
+  if (!scheduleResult.ok) {
+    dailyJournalReminderStatusMessage.value = scheduleResult.message;
+    dailyJournalReminderIsSaving.value = false;
+    return;
+  }
+
+  const savedSettings = setDailyJournalReminderEnabled(true);
+
+  if (!savedSettings) {
+    await cancelDailyJournalReminderNotification();
+    dailyJournalReminderStatusMessage.value = '每日提醒已经向系统申请，但本地状态保存失败，请再试一次。';
+    dailyJournalReminderIsSaving.value = false;
+    return;
+  }
+
+  refreshDailyJournalReminder();
+  dailyJournalReminderStatusMessage.value = scheduleResult.message;
+  dailyJournalReminderIsSaving.value = false;
+}
+
+async function disableDailyJournalReminder() {
+  if (dailyJournalReminderIsSaving.value) {
+    return;
+  }
+
+  dailyJournalReminderIsSaving.value = true;
+
+  const savedSettings = setDailyJournalReminderEnabled(false);
+
+  if (!savedSettings) {
+    dailyJournalReminderStatusMessage.value = '关闭失败，本地状态暂时没有保存下来。';
+    dailyJournalReminderIsSaving.value = false;
+    return;
+  }
+
+  refreshDailyJournalReminder();
+  await cancelDailyJournalReminderNotification();
+  dailyJournalReminderStatusMessage.value = `已关闭每日 ${dailyJournalReminderTimeLabel.value} 系统提醒。`;
+  dailyJournalReminderIsSaving.value = false;
+}
+
+async function syncDailyJournalReminderOnLaunch() {
+  refreshDailyJournalReminder();
+
+  if (!dailyJournalReminder.value.enabled) {
+    return;
+  }
+
+  const scheduleResult = await scheduleDailyJournalReminderNotification(
+    dailyJournalReminder.value.hour,
+    dailyJournalReminder.value.minute,
+  );
+
+  if (!scheduleResult.ok) {
+    setDailyJournalReminderEnabled(false);
+    refreshDailyJournalReminder();
+    dailyJournalReminderStatusMessage.value = `${scheduleResult.message} 你可以稍后再重新开启。`;
+  }
 }
 
 function cancelTargetReminders(
@@ -3573,18 +3696,32 @@ async function submitAgentMessage() {
   }
 }
 
+let removeReminderNotificationActionListener: (() => void) | null = null;
+
 onMounted(() => {
   document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
   window.addEventListener('resize', handleAgentViewportResize);
   void nextTick(initializeAgentFabPosition);
+  void syncDailyJournalReminderOnLaunch();
   void listenForReminderNotificationActions((action) => {
-    focusReminderById(action.reminderId);
+    if (action.kind === 'daily-journal-reminder') {
+      openDailyJournalReminderComposer();
+      return;
+    }
+
+    if (action.reminderId) {
+      focusReminderById(action.reminderId);
+    }
+  }).then((removeListener) => {
+    removeReminderNotificationActionListener = removeListener;
   });
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', captureTodoSelectionFromWindow);
   window.removeEventListener('resize', handleAgentViewportResize);
+  removeReminderNotificationActionListener?.();
+  removeReminderNotificationActionListener = null;
   clearTodoCompletionTimer();
 });
 </script>
@@ -5762,11 +5899,11 @@ onBeforeUnmount(() => {
           <p class="eyebrow">后续 Park</p>
           <h2 id="plan-park-title">计划区</h2>
         </div>
-        <span class="counter">规划中</span>
+        <span class="counter">提醒可用</span>
       </div>
 
       <div class="park-intro">
-        <p>目标、计划、待办和周期回顾后续会放在这里，和日记、知识笔记分开。</p>
+        <p>目标、计划、待办和周期回顾后续会放在这里；现在先放一个每日记录提醒入口，帮你养成晚间回顾习惯。</p>
       </div>
 
       <div class="park-boundary-list" aria-label="计划区 Park 边界">
@@ -5779,6 +5916,58 @@ onBeforeUnmount(() => {
           <span>可以再和日记复盘、项目进度、Agent 提醒联动。</span>
         </div>
       </div>
+
+      <section class="tool-card daily-reminder-card" aria-labelledby="daily-reminder-title">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">固定提醒</p>
+            <h2 id="daily-reminder-title">每日记录提醒</h2>
+          </div>
+          <span class="counter">
+            {{ dailyJournalReminder.enabled ? '已开启' : '未开启' }}
+          </span>
+        </div>
+
+        <p class="daily-reminder-copy">
+          每天晚上 {{ dailyJournalReminderTimeLabel }} 发一条系统通知，提醒你回来记一下今天。
+        </p>
+
+        <div class="daily-reminder-meta">
+          <span>固定时间 {{ dailyJournalReminderTimeLabel }}</span>
+          <span v-if="dailyJournalReminder.updatedAt">
+            上次调整 {{ getDateGroupLabel(dailyJournalReminder.updatedAt) }} ·
+            {{ formatEntryTime(dailyJournalReminder.updatedAt) }}
+          </span>
+        </div>
+
+        <p v-if="dailyJournalReminderStatusMessage" class="daily-reminder-status">
+          {{ dailyJournalReminderStatusMessage }}
+        </p>
+
+        <div class="entry-actions">
+          <button class="ghost-action" type="button" @click="openDailyJournalReminderComposer">
+            去记录
+          </button>
+          <button
+            class="primary-action small"
+            type="button"
+            :disabled="dailyJournalReminderIsSaving"
+            @click="
+              dailyJournalReminder.enabled
+                ? disableDailyJournalReminder()
+                : enableDailyJournalReminder()
+            "
+          >
+            {{
+              dailyJournalReminderIsSaving
+                ? '处理中...'
+                : dailyJournalReminder.enabled
+                  ? '关闭提醒'
+                  : '开启提醒'
+            }}
+          </button>
+        </div>
+      </section>
     </section>
 
     <div
