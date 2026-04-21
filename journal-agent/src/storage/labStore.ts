@@ -5,6 +5,7 @@ const PROJECTS_STORAGE_KEY = 'journal-agent.lab.projects.v1';
 const RECORDS_STORAGE_KEY = 'journal-agent.lab.records.v1';
 const MAX_PROJECT_NAME_LENGTH = 40;
 const MAX_RECORD_TITLE_LENGTH = 80;
+export const MAX_PINNED_LAB_RECORDS_PER_PROJECT = 5;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -47,6 +48,9 @@ const parseLabRecord = (value: unknown): LabRecord | null => {
     typeof value.createdAt !== 'string' ||
     typeof value.updatedAt !== 'string' ||
     (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
+    (typeof value.pinnedAt !== 'string' &&
+      value.pinnedAt !== null &&
+      value.pinnedAt !== undefined) ||
     (typeof value.branchId !== 'string' &&
       value.branchId !== null &&
       value.branchId !== undefined)
@@ -58,6 +62,7 @@ const parseLabRecord = (value: unknown): LabRecord | null => {
     id: value.id,
     projectId: value.projectId,
     branchId: typeof value.branchId === 'string' ? value.branchId : null,
+    pinnedAt: typeof value.pinnedAt === 'string' ? value.pinnedAt : null,
     title: value.title,
     content: value.content,
     type: value.type,
@@ -138,11 +143,26 @@ const writeRecords = (records: LabRecord[]): boolean =>
   writeCollection(RECORDS_STORAGE_KEY, records);
 
 const sortByUpdatedAtDesc = <T extends { updatedAt: string }>(items: T[]): T[] =>
-  items.sort(
+  [...items].sort(
     (firstItem, secondItem) =>
       new Date(secondItem.updatedAt).getTime() -
       new Date(firstItem.updatedAt).getTime(),
   );
+
+const sortPinnedRecords = (records: LabRecord[]): LabRecord[] =>
+  [...records].sort((firstRecord, secondRecord) => {
+    const firstPinnedAt = firstRecord.pinnedAt ? new Date(firstRecord.pinnedAt).getTime() : 0;
+    const secondPinnedAt = secondRecord.pinnedAt ? new Date(secondRecord.pinnedAt).getTime() : 0;
+
+    if (firstPinnedAt !== secondPinnedAt) {
+      return secondPinnedAt - firstPinnedAt;
+    }
+
+    return (
+      new Date(secondRecord.updatedAt).getTime() -
+      new Date(firstRecord.updatedAt).getTime()
+    );
+  });
 
 const createRecordTitle = (content: string, title = ''): string => {
   const normalizedTitle = title.trim();
@@ -182,7 +202,7 @@ export const getLabProjects = (): LabProject[] =>
   );
 
 export const getLabRecords = (projectId?: string): LabRecord[] =>
-  sortByUpdatedAtDesc(
+  sortPinnedRecords(
     readRecords().filter(
       (record) =>
         record.deletedAt === null &&
@@ -301,6 +321,7 @@ export const createLabRecord = (
     id: createId('lab-record'),
     projectId,
     branchId: fields.branchId,
+    pinnedAt: null,
     title: createRecordTitle(normalizedContent, fields.title),
     content: normalizedContent,
     type: fields.type,
@@ -364,6 +385,44 @@ export const updateLabRecord = (
   touchProject(updatedRecord.projectId, updatedRecord.updatedAt);
 
   return updatedRecord;
+};
+
+export const setLabRecordPinned = (
+  id: string,
+  pinned: boolean,
+): LabRecord | null => {
+  const records = readRecords();
+  const recordIndex = records.findIndex(
+    (record) => record.id === id && record.deletedAt === null,
+  );
+
+  if (recordIndex === -1) {
+    return null;
+  }
+
+  const currentRecord = records[recordIndex];
+
+  if (
+    pinned &&
+    currentRecord.pinnedAt === null &&
+    records.filter(
+      (record) =>
+        record.projectId === currentRecord.projectId &&
+        record.deletedAt === null &&
+        record.pinnedAt !== null,
+    ).length >= MAX_PINNED_LAB_RECORDS_PER_PROJECT
+  ) {
+    return null;
+  }
+
+  const updatedRecord: LabRecord = {
+    ...currentRecord,
+    pinnedAt: pinned ? currentRecord.pinnedAt ?? new Date().toISOString() : null,
+  };
+  const nextRecords = [...records];
+  nextRecords[recordIndex] = updatedRecord;
+
+  return writeRecords(nextRecords) ? updatedRecord : null;
 };
 
 export const deleteLabRecord = (id: string): void => {
