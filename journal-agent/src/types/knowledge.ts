@@ -12,6 +12,7 @@ export interface KnowledgeNote {
   id: string;
   baseId: string;
   branchId: string | null;
+  flaggedAt: string | null;
   pinnedAt: string | null;
   title: string;
   content: string;

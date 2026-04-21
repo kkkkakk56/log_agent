@@ -45,6 +45,9 @@ const parseKnowledgeNote = (value: unknown): KnowledgeNote | null => {
     typeof value.createdAt !== 'string' ||
     typeof value.updatedAt !== 'string' ||
     (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
+    (typeof value.flaggedAt !== 'string' &&
+      value.flaggedAt !== null &&
+      value.flaggedAt !== undefined) ||
     (typeof value.pinnedAt !== 'string' &&
       value.pinnedAt !== null &&
       value.pinnedAt !== undefined) ||
@@ -59,6 +62,7 @@ const parseKnowledgeNote = (value: unknown): KnowledgeNote | null => {
     id: value.id,
     baseId: value.baseId,
     branchId: typeof value.branchId === 'string' ? value.branchId : null,
+    flaggedAt: typeof value.flaggedAt === 'string' ? value.flaggedAt : null,
     pinnedAt: typeof value.pinnedAt === 'string' ? value.pinnedAt : null,
     title: value.title,
     content: value.content,
@@ -320,6 +324,7 @@ export const createKnowledgeNote = (
     id: createId('knowledge-note'),
     baseId,
     branchId: fields.branchId,
+    flaggedAt: null,
     pinnedAt: null,
     title: createNoteTitle(normalizedContent, fields.title),
     content: normalizedContent,
@@ -420,6 +425,30 @@ export const setKnowledgeNotePinned = (
   const updatedNote: KnowledgeNote = {
     ...currentNote,
     pinnedAt: pinned ? currentNote.pinnedAt ?? new Date().toISOString() : null,
+  };
+  const nextNotes = [...notes];
+  nextNotes[noteIndex] = updatedNote;
+
+  return writeNotes(nextNotes) ? updatedNote : null;
+};
+
+export const setKnowledgeNoteFlagged = (
+  id: string,
+  flagged: boolean,
+): KnowledgeNote | null => {
+  const notes = readNotes();
+  const noteIndex = notes.findIndex(
+    (note) => note.id === id && note.deletedAt === null,
+  );
+
+  if (noteIndex === -1) {
+    return null;
+  }
+
+  const currentNote = notes[noteIndex];
+  const updatedNote: KnowledgeNote = {
+    ...currentNote,
+    flaggedAt: flagged ? currentNote.flaggedAt ?? new Date().toISOString() : null,
   };
   const nextNotes = [...notes];
   nextNotes[noteIndex] = updatedNote;

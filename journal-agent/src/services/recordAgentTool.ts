@@ -886,6 +886,7 @@ const serializeJournalEntryPreview = (entry: JournalEntry, index: number): strin
     `title: ${entry.title || '无标题'}`,
     `createdAt: ${formatDateTime(entry.createdAt)}`,
     `updatedAt: ${formatDateTime(entry.updatedAt)}`,
+    `flagged: ${entry.flaggedAt ? '是' : '否'}`,
     `contentPreview: ${truncateText(entry.content, MAX_CONTENT_PREVIEW_LENGTH)}`,
   ].join('\n');
 
@@ -896,6 +897,7 @@ const serializeSelectedJournalEntry = (entry: JournalEntry): string =>
     `title: ${entry.title || '无标题'}`,
     `createdAt: ${formatDateTime(entry.createdAt)}`,
     `updatedAt: ${formatDateTime(entry.updatedAt)}`,
+    `flagged: ${entry.flaggedAt ? '是' : '否'}`,
     `content: ${entry.content}`,
   ].join('\n');
 
@@ -938,6 +940,7 @@ const serializeKnowledgeNotePreview = (
     `branch: ${branchLabel}`,
     `title: ${note.title}`,
     `updatedAt: ${formatDateTime(note.updatedAt)}`,
+    `flagged: ${note.flaggedAt ? '是' : '否'}`,
     `sourceUrl: ${note.sourceUrl || '无'}`,
     `tags: ${note.tags.length > 0 ? note.tags.join(', ') : '无'}`,
     `contentPreview: ${truncateText(note.content, MAX_CONTENT_PREVIEW_LENGTH)}`,
@@ -956,6 +959,7 @@ const serializeSelectedKnowledgeNote = (
     `branch: ${branchLabel}`,
     `title: ${note.title}`,
     `updatedAt: ${formatDateTime(note.updatedAt)}`,
+    `flagged: ${note.flaggedAt ? '是' : '否'}`,
     `sourceUrl: ${note.sourceUrl || '无'}`,
     `tags: ${note.tags.length > 0 ? note.tags.join(', ') : '无'}`,
     `content: ${note.content}`,
@@ -986,6 +990,7 @@ const serializeLabRecordPreview = (
     `title: ${record.title}`,
     `type: ${LAB_RECORD_TYPE_LABELS[record.type]}`,
     `updatedAt: ${formatDateTime(record.updatedAt)}`,
+    `flagged: ${record.flaggedAt ? '是' : '否'}`,
     `tags: ${record.tags.length > 0 ? record.tags.join(', ') : '无'}`,
     `contentPreview: ${truncateText(record.content, MAX_CONTENT_PREVIEW_LENGTH)}`,
   ].join('\n');
@@ -1004,6 +1009,7 @@ const serializeSelectedLabRecord = (
     `title: ${record.title}`,
     `type: ${LAB_RECORD_TYPE_LABELS[record.type]}`,
     `updatedAt: ${formatDateTime(record.updatedAt)}`,
+    `flagged: ${record.flaggedAt ? '是' : '否'}`,
     `tags: ${record.tags.length > 0 ? record.tags.join(', ') : '无'}`,
     `content: ${record.content}`,
   ].join('\n');

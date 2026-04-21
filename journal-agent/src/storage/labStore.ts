@@ -48,6 +48,9 @@ const parseLabRecord = (value: unknown): LabRecord | null => {
     typeof value.createdAt !== 'string' ||
     typeof value.updatedAt !== 'string' ||
     (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
+    (typeof value.flaggedAt !== 'string' &&
+      value.flaggedAt !== null &&
+      value.flaggedAt !== undefined) ||
     (typeof value.pinnedAt !== 'string' &&
       value.pinnedAt !== null &&
       value.pinnedAt !== undefined) ||
@@ -62,6 +65,7 @@ const parseLabRecord = (value: unknown): LabRecord | null => {
     id: value.id,
     projectId: value.projectId,
     branchId: typeof value.branchId === 'string' ? value.branchId : null,
+    flaggedAt: typeof value.flaggedAt === 'string' ? value.flaggedAt : null,
     pinnedAt: typeof value.pinnedAt === 'string' ? value.pinnedAt : null,
     title: value.title,
     content: value.content,
@@ -321,6 +325,7 @@ export const createLabRecord = (
     id: createId('lab-record'),
     projectId,
     branchId: fields.branchId,
+    flaggedAt: null,
     pinnedAt: null,
     title: createRecordTitle(normalizedContent, fields.title),
     content: normalizedContent,
@@ -418,6 +423,30 @@ export const setLabRecordPinned = (
   const updatedRecord: LabRecord = {
     ...currentRecord,
     pinnedAt: pinned ? currentRecord.pinnedAt ?? new Date().toISOString() : null,
+  };
+  const nextRecords = [...records];
+  nextRecords[recordIndex] = updatedRecord;
+
+  return writeRecords(nextRecords) ? updatedRecord : null;
+};
+
+export const setLabRecordFlagged = (
+  id: string,
+  flagged: boolean,
+): LabRecord | null => {
+  const records = readRecords();
+  const recordIndex = records.findIndex(
+    (record) => record.id === id && record.deletedAt === null,
+  );
+
+  if (recordIndex === -1) {
+    return null;
+  }
+
+  const currentRecord = records[recordIndex];
+  const updatedRecord: LabRecord = {
+    ...currentRecord,
+    flaggedAt: flagged ? currentRecord.flaggedAt ?? new Date().toISOString() : null,
   };
   const nextRecords = [...records];
   nextRecords[recordIndex] = updatedRecord;
