@@ -12,6 +12,7 @@ import type { RecordBranch } from './types/branch';
 import type { JournalEntry } from './types/journal';
 import type { KnowledgeBase, KnowledgeNote } from './types/knowledge';
 import type { LabProject, LabRecord, LabRecordType } from './types/lab';
+import type { RecordImageAttachment } from './types/media';
 import type { DailyJournalReminderSettings } from './types/dailyReminder';
 import type { RecordReminder, ReminderTargetType } from './types/reminder';
 import type { TodoMark, TodoParkType, TodoTargetType } from './types/todo';
@@ -136,6 +137,7 @@ import {
   getBranchDescendantIds,
   getBranchPathLabel,
 } from './utils/branchTree';
+import { MAX_RECORD_IMAGES, importRecordImages } from './utils/recordImages';
 
 type ActivePark = 'journal' | 'knowledge' | 'lab' | 'todo' | 'vault' | 'plan';
 type ActiveView = 'timeline' | 'search' | 'calendar';
@@ -155,6 +157,13 @@ type LabInspectorMode =
   | 'record-create';
 type BranchFilterId = 'all' | 'ungrouped' | string;
 type CardActionId = 'flag' | 'pin' | 'todo' | 'reminder' | 'edit' | 'delete';
+type ImageImportTarget =
+  | 'journal-draft'
+  | 'journal-edit'
+  | 'knowledge-create'
+  | 'knowledge-edit'
+  | 'lab-create'
+  | 'lab-edit';
 
 type CardActionMenuTarget =
   | {
@@ -317,9 +326,11 @@ const activeView = ref<ActiveView>('timeline');
 const draftTitle = ref('');
 const draftContent = ref('');
 const draftEntryDate = ref(getLocalDateKey(new Date()));
+const draftImages = ref<RecordImageAttachment[]>([]);
 const editingId = ref<string | null>(null);
 const editingContent = ref('');
 const editingEntryDate = ref('');
+const editingImages = ref<RecordImageAttachment[]>([]);
 const activeKnowledgeBaseId = ref<string | null>(knowledgeBases.value[0]?.id ?? null);
 const knowledgeDrawerOpen = ref(knowledgeBases.value.length === 0);
 const knowledgeBaseComposerOpen = ref(knowledgeBases.value.length === 0);
@@ -339,12 +350,14 @@ const newKnowledgeNoteContent = ref('');
 const newKnowledgeNoteSourceUrl = ref('');
 const newKnowledgeNoteTags = ref('');
 const newKnowledgeNoteBranchValue = ref(BRANCH_UNGROUPED_VALUE);
+const newKnowledgeNoteImages = ref<RecordImageAttachment[]>([]);
 const editingKnowledgeNoteId = ref<string | null>(null);
 const editingKnowledgeNoteTitle = ref('');
 const editingKnowledgeNoteContent = ref('');
 const editingKnowledgeNoteSourceUrl = ref('');
 const editingKnowledgeNoteTags = ref('');
 const editingKnowledgeNoteBranchValue = ref(BRANCH_UNGROUPED_VALUE);
+const editingKnowledgeNoteImages = ref<RecordImageAttachment[]>([]);
 const activeLabProjectId = ref<string | null>(labProjects.value[0]?.id ?? null);
 const labDrawerOpen = ref(labProjects.value.length === 0);
 const labProjectComposerOpen = ref(labProjects.value.length === 0);
@@ -364,14 +377,17 @@ const newLabRecordContent = ref('');
 const newLabRecordType = ref<LabRecordType>('operation');
 const newLabRecordTags = ref('');
 const newLabRecordBranchValue = ref(BRANCH_UNGROUPED_VALUE);
+const newLabRecordImages = ref<RecordImageAttachment[]>([]);
 const editingLabRecordId = ref<string | null>(null);
 const editingLabRecordTitle = ref('');
 const editingLabRecordContent = ref('');
 const editingLabRecordType = ref<LabRecordType>('operation');
 const editingLabRecordTags = ref('');
 const editingLabRecordBranchValue = ref(BRANCH_UNGROUPED_VALUE);
+const editingLabRecordImages = ref<RecordImageAttachment[]>([]);
 const searchQuery = ref('');
 const searchInputRef = ref<HTMLInputElement | null>(null);
+const imageImportInputRef = ref<HTMLInputElement | null>(null);
 const calendarMonth = ref(startOfMonth(new Date()));
 const selectedDateKey = ref(getLocalDateKey(new Date()));
 const agentPanelOpen = ref(false);
@@ -414,6 +430,9 @@ const highlightedReminderTarget = ref<{
   targetId: string;
   quote: string;
 } | null>(null);
+const recordImagePreview = ref<RecordImageAttachment | null>(null);
+const pendingImageImportTarget = ref<ImageImportTarget | null>(null);
+const imageImportBusyTarget = ref<ImageImportTarget | null>(null);
 const highlightedTodoId = ref<string | null>(null);
 const expandedJournalEntryIds = ref<Set<string>>(new Set());
 const cardActionMenuTarget = ref<CardActionMenuTarget | null>(null);
@@ -1146,6 +1165,118 @@ function clearSearchQuery() {
   nextTick(() => {
     searchInputRef.value?.focus();
   });
+}
+
+function getImagesForTarget(target: ImageImportTarget): RecordImageAttachment[] {
+  switch (target) {
+    case 'journal-draft':
+      return draftImages.value;
+    case 'journal-edit':
+      return editingImages.value;
+    case 'knowledge-create':
+      return newKnowledgeNoteImages.value;
+    case 'knowledge-edit':
+      return editingKnowledgeNoteImages.value;
+    case 'lab-create':
+      return newLabRecordImages.value;
+    case 'lab-edit':
+      return editingLabRecordImages.value;
+  }
+}
+
+function setImagesForTarget(target: ImageImportTarget, images: RecordImageAttachment[]) {
+  switch (target) {
+    case 'journal-draft':
+      draftImages.value = images;
+      return;
+    case 'journal-edit':
+      editingImages.value = images;
+      return;
+    case 'knowledge-create':
+      newKnowledgeNoteImages.value = images;
+      return;
+    case 'knowledge-edit':
+      editingKnowledgeNoteImages.value = images;
+      return;
+    case 'lab-create':
+      newLabRecordImages.value = images;
+      return;
+    case 'lab-edit':
+      editingLabRecordImages.value = images;
+  }
+}
+
+function isImportingImages(target: ImageImportTarget): boolean {
+  return imageImportBusyTarget.value === target;
+}
+
+function openImageImporter(target: ImageImportTarget) {
+  if (imageImportBusyTarget.value) {
+    return;
+  }
+
+  pendingImageImportTarget.value = target;
+
+  if (imageImportInputRef.value) {
+    imageImportInputRef.value.value = '';
+    imageImportInputRef.value.click();
+  }
+}
+
+function removeImportedImage(target: ImageImportTarget, imageId: string) {
+  setImagesForTarget(
+    target,
+    getImagesForTarget(target).filter((image) => image.id !== imageId),
+  );
+}
+
+async function handleImageImportChange(event: Event) {
+  const target = pendingImageImportTarget.value;
+  const input = event.target;
+
+  if (!target || !(input instanceof HTMLInputElement)) {
+    return;
+  }
+
+  const files = Array.from(input.files ?? []);
+
+  if (files.length === 0) {
+    pendingImageImportTarget.value = null;
+    return;
+  }
+
+  imageImportBusyTarget.value = target;
+
+  try {
+    const { images, warnings } = await importRecordImages(files);
+    const existingImages = getImagesForTarget(target);
+    const availableSlots = Math.max(0, MAX_RECORD_IMAGES - existingImages.length);
+    const acceptedImages = images.slice(0, availableSlots);
+
+    if (acceptedImages.length > 0) {
+      setImagesForTarget(target, [...existingImages, ...acceptedImages]);
+    }
+
+    if (images.length > acceptedImages.length) {
+      warnings.push(`单条记录最多保留 ${MAX_RECORD_IMAGES} 张图片，多出的图片已跳过。`);
+    }
+
+    if (warnings.length > 0) {
+      window.alert(warnings.join('\n'));
+    }
+  } finally {
+    imageImportBusyTarget.value = null;
+    pendingImageImportTarget.value = null;
+    input.value = '';
+  }
+}
+
+function openRecordImagePreview(image: RecordImageAttachment) {
+  recordImagePreview.value = image;
+}
+
+function closeRecordImagePreview() {
+  recordImagePreview.value = null;
 }
 
 function refreshEntries() {
@@ -3353,6 +3484,7 @@ function resetNewKnowledgeNoteForm() {
   newKnowledgeNoteContent.value = '';
   newKnowledgeNoteSourceUrl.value = '';
   newKnowledgeNoteTags.value = '';
+  newKnowledgeNoteImages.value = [];
   newKnowledgeNoteBranchValue.value =
     activeKnowledgeBranchFilterId.value === 'all'
       ? BRANCH_UNGROUPED_VALUE
@@ -3734,10 +3866,11 @@ function saveNewKnowledgeNote() {
     sourceUrl: newKnowledgeNoteSourceUrl.value,
     tags: parseTagInput(newKnowledgeNoteTags.value),
     branchId: decodeBranchValue(newKnowledgeNoteBranchValue.value),
+    images: newKnowledgeNoteImages.value,
   });
 
   if (!note) {
-    window.alert('笔记保存失败。请确认分支仍然可用。');
+    window.alert('笔记保存失败。请确认分支仍然可用，或减少图片后再试。');
     return;
   }
 
@@ -3794,6 +3927,7 @@ function startKnowledgeNoteEditing(note: KnowledgeNote) {
   editingKnowledgeNoteSourceUrl.value = note.sourceUrl;
   editingKnowledgeNoteTags.value = note.tags.join('，');
   editingKnowledgeNoteBranchValue.value = encodeBranchValue(note.branchId);
+  editingKnowledgeNoteImages.value = [...note.images];
 }
 
 function cancelKnowledgeNoteEditing() {
@@ -3803,6 +3937,7 @@ function cancelKnowledgeNoteEditing() {
   editingKnowledgeNoteSourceUrl.value = '';
   editingKnowledgeNoteTags.value = '';
   editingKnowledgeNoteBranchValue.value = BRANCH_UNGROUPED_VALUE;
+  editingKnowledgeNoteImages.value = [];
 }
 
 function saveKnowledgeNoteEditing() {
@@ -3816,10 +3951,11 @@ function saveKnowledgeNoteEditing() {
     sourceUrl: editingKnowledgeNoteSourceUrl.value,
     tags: parseTagInput(editingKnowledgeNoteTags.value),
     branchId: decodeBranchValue(editingKnowledgeNoteBranchValue.value),
+    images: editingKnowledgeNoteImages.value,
   });
 
   if (!updatedNote) {
-    window.alert('笔记更新失败。请确认分支仍然可用。');
+    window.alert('笔记更新失败。请确认分支仍然可用，或减少图片后再试。');
     return;
   }
 
@@ -3906,6 +4042,7 @@ function resetNewLabRecordForm() {
   newLabRecordContent.value = '';
   newLabRecordType.value = 'operation';
   newLabRecordTags.value = '';
+  newLabRecordImages.value = [];
   newLabRecordBranchValue.value =
     activeLabBranchFilterId.value === 'all'
       ? BRANCH_UNGROUPED_VALUE
@@ -4294,10 +4431,11 @@ function saveNewLabRecord() {
     type: newLabRecordType.value,
     tags: parseTagInput(newLabRecordTags.value),
     branchId: decodeBranchValue(newLabRecordBranchValue.value),
+    images: newLabRecordImages.value,
   });
 
   if (!record) {
-    window.alert('记录保存失败。请确认分支仍然可用。');
+    window.alert('记录保存失败。请确认分支仍然可用，或减少图片后再试。');
     return;
   }
 
@@ -4369,6 +4507,7 @@ function startLabRecordEditing(record: LabRecord) {
   editingLabRecordType.value = record.type;
   editingLabRecordTags.value = record.tags.join('，');
   editingLabRecordBranchValue.value = encodeBranchValue(record.branchId);
+  editingLabRecordImages.value = [...record.images];
 }
 
 function cancelLabRecordEditing() {
@@ -4378,6 +4517,7 @@ function cancelLabRecordEditing() {
   editingLabRecordType.value = 'operation';
   editingLabRecordTags.value = '';
   editingLabRecordBranchValue.value = BRANCH_UNGROUPED_VALUE;
+  editingLabRecordImages.value = [];
 }
 
 function saveLabRecordEditing() {
@@ -4391,10 +4531,11 @@ function saveLabRecordEditing() {
     type: editingLabRecordType.value,
     tags: parseTagInput(editingLabRecordTags.value),
     branchId: decodeBranchValue(editingLabRecordBranchValue.value),
+    images: editingLabRecordImages.value,
   });
 
   if (!updatedRecord) {
-    window.alert('记录更新失败。请确认分支仍然可用。');
+    window.alert('记录更新失败。请确认分支仍然可用，或减少图片后再试。');
     return;
   }
 
@@ -4618,14 +4759,17 @@ function saveDraft() {
     draftContent.value,
     draftTitle.value,
     draftEntryDate.value,
+    draftImages.value,
   );
 
   if (!entry) {
+    window.alert('保存失败。可以试试减少图片后再保存。');
     return;
   }
 
   draftTitle.value = '';
   draftContent.value = '';
+  draftImages.value = [];
   selectedDateKey.value = entry.entryDate;
   calendarMonth.value = startOfMonth(new Date(`${entry.entryDate}T00:00:00`));
   refreshEntries();
@@ -4636,12 +4780,14 @@ function startEditing(entry: JournalEntry) {
   editingId.value = entry.id;
   editingContent.value = entry.content;
   editingEntryDate.value = getJournalEntryDateKey(entry);
+  editingImages.value = [...entry.images];
 }
 
 function cancelEditing() {
   editingId.value = null;
   editingContent.value = '';
   editingEntryDate.value = '';
+  editingImages.value = [];
 }
 
 function saveEditing() {
@@ -4656,9 +4802,11 @@ function saveEditing() {
   const updated = updateEntry(editingId.value, {
     content: editingContent.value,
     entryDate: editingEntryDate.value,
+    images: editingImages.value,
   });
 
   if (!updated) {
+    window.alert('更新失败。可以试试减少图片后再保存。');
     return;
   }
 
@@ -5225,6 +5373,38 @@ onBeforeUnmount(() => {
         rows="6"
       />
 
+      <div class="record-image-toolbar">
+        <button
+          class="ghost-action"
+          type="button"
+          :disabled="isImportingImages('journal-draft') || draftImages.length >= MAX_RECORD_IMAGES"
+          @click="openImageImporter('journal-draft')"
+        >
+          {{ isImportingImages('journal-draft') ? '导入中...' : '导入图片' }}
+        </button>
+        <small>最多 {{ MAX_RECORD_IMAGES }} 张，导入后会自动压缩并保存在本地。</small>
+      </div>
+
+      <div v-if="draftImages.length > 0" class="record-image-grid is-editor">
+        <div v-for="image in draftImages" :key="image.id" class="record-image-card is-editor">
+          <button
+            class="record-image-button"
+            type="button"
+            :aria-label="`预览 ${image.name}`"
+            @click="openRecordImagePreview(image)"
+          >
+            <img :src="image.dataUrl" :alt="image.name" />
+          </button>
+          <button
+            class="record-image-remove"
+            type="button"
+            @click="removeImportedImage('journal-draft', image.id)"
+          >
+            移除
+          </button>
+        </div>
+      </div>
+
       <button class="primary-action" type="button" :disabled="!canSaveDraft" @click="saveDraft">
         保存这一刻
       </button>
@@ -5293,6 +5473,36 @@ onBeforeUnmount(() => {
               />
             </label>
             <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
+            <div class="record-image-toolbar">
+              <button
+                class="ghost-action"
+                type="button"
+                :disabled="isImportingImages('journal-edit') || editingImages.length >= MAX_RECORD_IMAGES"
+                @click="openImageImporter('journal-edit')"
+              >
+                {{ isImportingImages('journal-edit') ? '导入中...' : '导入图片' }}
+              </button>
+              <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+            </div>
+            <div v-if="editingImages.length > 0" class="record-image-grid is-editor">
+              <div v-for="image in editingImages" :key="image.id" class="record-image-card is-editor">
+                <button
+                  class="record-image-button"
+                  type="button"
+                  :aria-label="`预览 ${image.name}`"
+                  @click="openRecordImagePreview(image)"
+                >
+                  <img :src="image.dataUrl" :alt="image.name" />
+                </button>
+                <button
+                  class="record-image-remove"
+                  type="button"
+                  @click="removeImportedImage('journal-edit', image.id)"
+                >
+                  移除
+                </button>
+              </div>
+            </div>
             <div class="entry-actions">
               <button class="ghost-action" type="button" @click="cancelEditing">取消</button>
               <button
@@ -5359,6 +5569,21 @@ onBeforeUnmount(() => {
                     : result.previewHtml
                 "
               ></p>
+              <div
+                v-if="isJournalEntryExpanded(result.entry.id) && result.entry.images.length > 0"
+                class="record-image-grid"
+              >
+                <button
+                  v-for="image in result.entry.images"
+                  :key="image.id"
+                  class="record-image-button"
+                  type="button"
+                  :aria-label="`查看 ${image.name}`"
+                  @click.stop="openRecordImagePreview(image)"
+                >
+                  <img :src="image.dataUrl" :alt="image.name" />
+                </button>
+              </div>
               <div
                 v-if="result.matchedTagsHtml.length > 0"
                 class="search-tag-hit-list"
@@ -5506,6 +5731,36 @@ onBeforeUnmount(() => {
                 />
               </label>
               <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
+              <div class="record-image-toolbar">
+                <button
+                  class="ghost-action"
+                  type="button"
+                  :disabled="isImportingImages('journal-edit') || editingImages.length >= MAX_RECORD_IMAGES"
+                  @click="openImageImporter('journal-edit')"
+                >
+                  {{ isImportingImages('journal-edit') ? '导入中...' : '导入图片' }}
+                </button>
+                <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+              </div>
+              <div v-if="editingImages.length > 0" class="record-image-grid is-editor">
+                <div v-for="image in editingImages" :key="image.id" class="record-image-card is-editor">
+                  <button
+                    class="record-image-button"
+                    type="button"
+                    :aria-label="`预览 ${image.name}`"
+                    @click="openRecordImagePreview(image)"
+                  >
+                    <img :src="image.dataUrl" :alt="image.name" />
+                  </button>
+                  <button
+                    class="record-image-remove"
+                    type="button"
+                    @click="removeImportedImage('journal-edit', image.id)"
+                  >
+                    移除
+                  </button>
+                </div>
+              </div>
               <div class="entry-actions">
                 <button class="ghost-action" type="button" @click="cancelEditing">取消</button>
                 <button
@@ -5565,6 +5820,21 @@ onBeforeUnmount(() => {
                   @click.stop="handleJournalEntryContentClick(entry.id, $event)"
                   v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
                 ></p>
+                <div
+                  v-if="isJournalEntryExpanded(entry.id) && entry.images.length > 0"
+                  class="record-image-grid"
+                >
+                  <button
+                    v-for="image in entry.images"
+                    :key="image.id"
+                    class="record-image-button"
+                    type="button"
+                    :aria-label="`查看 ${image.name}`"
+                    @click.stop="openRecordImagePreview(image)"
+                  >
+                    <img :src="image.dataUrl" :alt="image.name" />
+                  </button>
+                </div>
               </div>
 
               <div
@@ -5713,6 +5983,36 @@ onBeforeUnmount(() => {
                 />
               </label>
               <textarea v-model="editingContent" class="journal-input edit-input" rows="7" />
+              <div class="record-image-toolbar">
+                <button
+                  class="ghost-action"
+                  type="button"
+                  :disabled="isImportingImages('journal-edit') || editingImages.length >= MAX_RECORD_IMAGES"
+                  @click="openImageImporter('journal-edit')"
+                >
+                  {{ isImportingImages('journal-edit') ? '导入中...' : '导入图片' }}
+                </button>
+                <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+              </div>
+              <div v-if="editingImages.length > 0" class="record-image-grid is-editor">
+                <div v-for="image in editingImages" :key="image.id" class="record-image-card is-editor">
+                  <button
+                    class="record-image-button"
+                    type="button"
+                    :aria-label="`预览 ${image.name}`"
+                    @click="openRecordImagePreview(image)"
+                  >
+                    <img :src="image.dataUrl" :alt="image.name" />
+                  </button>
+                  <button
+                    class="record-image-remove"
+                    type="button"
+                    @click="removeImportedImage('journal-edit', image.id)"
+                  >
+                    移除
+                  </button>
+                </div>
+              </div>
               <div class="entry-actions">
                 <button class="ghost-action" type="button" @click="cancelEditing">取消</button>
                 <button
@@ -5772,6 +6072,21 @@ onBeforeUnmount(() => {
                   @click.stop="handleJournalEntryContentClick(entry.id, $event)"
                   v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
                 ></p>
+                <div
+                  v-if="isJournalEntryExpanded(entry.id) && entry.images.length > 0"
+                  class="record-image-grid"
+                >
+                  <button
+                    v-for="image in entry.images"
+                    :key="image.id"
+                    class="record-image-button"
+                    type="button"
+                    :aria-label="`查看 ${image.name}`"
+                    @click.stop="openRecordImagePreview(image)"
+                  >
+                    <img :src="image.dataUrl" :alt="image.name" />
+                  </button>
+                </div>
               </div>
 
               <div
@@ -5868,11 +6183,26 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
               </div>
-              <p
-                @click.stop="handleJournalEntryContentClick(item.entry.id, $event)"
-                v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
-              ></p>
-            </div>
+                <p
+                  @click.stop="handleJournalEntryContentClick(item.entry.id, $event)"
+                  v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
+                ></p>
+                <div
+                  v-if="isJournalEntryExpanded(item.entry.id) && item.entry.images.length > 0"
+                  class="record-image-grid"
+                >
+                  <button
+                    v-for="image in item.entry.images"
+                    :key="image.id"
+                    class="record-image-button"
+                    type="button"
+                    :aria-label="`查看 ${image.name}`"
+                    @click.stop="openRecordImagePreview(image)"
+                  >
+                    <img :src="image.dataUrl" :alt="image.name" />
+                  </button>
+                </div>
+              </div>
           </article>
         </div>
       </section>
@@ -6700,6 +7030,40 @@ onBeforeUnmount(() => {
                       class="journal-input edit-input"
                       rows="10"
                     />
+                    <div class="record-image-toolbar">
+                      <button
+                        class="ghost-action"
+                        type="button"
+                        :disabled="isImportingImages('knowledge-edit') || editingKnowledgeNoteImages.length >= MAX_RECORD_IMAGES"
+                        @click="openImageImporter('knowledge-edit')"
+                      >
+                        {{ isImportingImages('knowledge-edit') ? '导入中...' : '导入图片' }}
+                      </button>
+                      <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+                    </div>
+                    <div v-if="editingKnowledgeNoteImages.length > 0" class="record-image-grid is-editor">
+                      <div
+                        v-for="image in editingKnowledgeNoteImages"
+                        :key="image.id"
+                        class="record-image-card is-editor"
+                      >
+                        <button
+                          class="record-image-button"
+                          type="button"
+                          :aria-label="`预览 ${image.name}`"
+                          @click="openRecordImagePreview(image)"
+                        >
+                          <img :src="image.dataUrl" :alt="image.name" />
+                        </button>
+                        <button
+                          class="record-image-remove"
+                          type="button"
+                          @click="removeImportedImage('knowledge-edit', image.id)"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    </div>
                     <label class="branch-field">
                       <span>归属分支</span>
                       <select v-model="editingKnowledgeNoteBranchValue" class="branch-select">
@@ -6755,6 +7119,19 @@ onBeforeUnmount(() => {
                       class="tag-row knowledge-detail-tags"
                     >
                       <span v-for="tag in note.tags" :key="tag">{{ tag }}</span>
+                    </div>
+
+                    <div v-if="note.images.length > 0" class="record-image-grid">
+                      <button
+                        v-for="image in note.images"
+                        :key="image.id"
+                        class="record-image-button"
+                        type="button"
+                        :aria-label="`查看 ${image.name}`"
+                        @click.stop="openRecordImagePreview(image)"
+                      >
+                        <img :src="image.dataUrl" :alt="image.name" />
+                      </button>
                     </div>
 
                     <a
@@ -6817,6 +7194,40 @@ onBeforeUnmount(() => {
               placeholder="写下知识点、操作步骤、理解、坑点或结论。"
               rows="10"
             />
+            <div class="record-image-toolbar">
+              <button
+                class="ghost-action"
+                type="button"
+                :disabled="isImportingImages('knowledge-create') || newKnowledgeNoteImages.length >= MAX_RECORD_IMAGES"
+                @click="openImageImporter('knowledge-create')"
+              >
+                {{ isImportingImages('knowledge-create') ? '导入中...' : '导入图片' }}
+              </button>
+              <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+            </div>
+            <div v-if="newKnowledgeNoteImages.length > 0" class="record-image-grid is-editor">
+              <div
+                v-for="image in newKnowledgeNoteImages"
+                :key="image.id"
+                class="record-image-card is-editor"
+              >
+                <button
+                  class="record-image-button"
+                  type="button"
+                  :aria-label="`预览 ${image.name}`"
+                  @click="openRecordImagePreview(image)"
+                >
+                  <img :src="image.dataUrl" :alt="image.name" />
+                </button>
+                <button
+                  class="record-image-remove"
+                  type="button"
+                  @click="removeImportedImage('knowledge-create', image.id)"
+                >
+                  移除
+                </button>
+              </div>
+            </div>
             <label class="branch-field">
               <span>归属分支</span>
               <select v-model="newKnowledgeNoteBranchValue" class="branch-select">
@@ -6879,6 +7290,40 @@ onBeforeUnmount(() => {
               class="journal-input edit-input"
               rows="10"
             />
+            <div class="record-image-toolbar">
+              <button
+                class="ghost-action"
+                type="button"
+                :disabled="isImportingImages('knowledge-edit') || editingKnowledgeNoteImages.length >= MAX_RECORD_IMAGES"
+                @click="openImageImporter('knowledge-edit')"
+              >
+                {{ isImportingImages('knowledge-edit') ? '导入中...' : '导入图片' }}
+              </button>
+              <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+            </div>
+            <div v-if="editingKnowledgeNoteImages.length > 0" class="record-image-grid is-editor">
+              <div
+                v-for="image in editingKnowledgeNoteImages"
+                :key="image.id"
+                class="record-image-card is-editor"
+              >
+                <button
+                  class="record-image-button"
+                  type="button"
+                  :aria-label="`预览 ${image.name}`"
+                  @click="openRecordImagePreview(image)"
+                >
+                  <img :src="image.dataUrl" :alt="image.name" />
+                </button>
+                <button
+                  class="record-image-remove"
+                  type="button"
+                  @click="removeImportedImage('knowledge-edit', image.id)"
+                >
+                  移除
+                </button>
+              </div>
+            </div>
             <label class="branch-field">
               <span>归属分支</span>
               <select v-model="editingKnowledgeNoteBranchValue" class="branch-select">
@@ -7446,6 +7891,40 @@ onBeforeUnmount(() => {
                       class="journal-input edit-input"
                       rows="10"
                     />
+                    <div class="record-image-toolbar">
+                      <button
+                        class="ghost-action"
+                        type="button"
+                        :disabled="isImportingImages('lab-edit') || editingLabRecordImages.length >= MAX_RECORD_IMAGES"
+                        @click="openImageImporter('lab-edit')"
+                      >
+                        {{ isImportingImages('lab-edit') ? '导入中...' : '导入图片' }}
+                      </button>
+                      <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+                    </div>
+                    <div v-if="editingLabRecordImages.length > 0" class="record-image-grid is-editor">
+                      <div
+                        v-for="image in editingLabRecordImages"
+                        :key="image.id"
+                        class="record-image-card is-editor"
+                      >
+                        <button
+                          class="record-image-button"
+                          type="button"
+                          :aria-label="`预览 ${image.name}`"
+                          @click="openRecordImagePreview(image)"
+                        >
+                          <img :src="image.dataUrl" :alt="image.name" />
+                        </button>
+                        <button
+                          class="record-image-remove"
+                          type="button"
+                          @click="removeImportedImage('lab-edit', image.id)"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    </div>
                     <label class="branch-field">
                       <span>归属分支</span>
                       <select v-model="editingLabRecordBranchValue" class="branch-select">
@@ -7512,6 +7991,19 @@ onBeforeUnmount(() => {
                       class="tag-row knowledge-detail-tags"
                     >
                       <span v-for="tag in record.tags" :key="tag">{{ tag }}</span>
+                    </div>
+
+                    <div v-if="record.images.length > 0" class="record-image-grid">
+                      <button
+                        v-for="image in record.images"
+                        :key="image.id"
+                        class="record-image-button"
+                        type="button"
+                        :aria-label="`查看 ${image.name}`"
+                        @click.stop="openRecordImagePreview(image)"
+                      >
+                        <img :src="image.dataUrl" :alt="image.name" />
+                      </button>
                     </div>
 
                     <label
@@ -7728,6 +8220,19 @@ onBeforeUnmount(() => {
                         <span v-for="tag in item.record.tags" :key="tag">{{ tag }}</span>
                       </div>
 
+                      <div v-if="item.record.images.length > 0" class="record-image-grid">
+                        <button
+                          v-for="image in item.record.images"
+                          :key="image.id"
+                          class="record-image-button"
+                          type="button"
+                          :aria-label="`查看 ${image.name}`"
+                          @click.stop="openRecordImagePreview(image)"
+                        >
+                          <img :src="image.dataUrl" :alt="image.name" />
+                        </button>
+                      </div>
+
                       <label
                         v-if="getSentenceTodosForTarget('project', item.record.id).some((todo) => todo.status === 'done')"
                         class="todo-hide-toggle"
@@ -7820,6 +8325,40 @@ onBeforeUnmount(() => {
               placeholder="写下这次做了什么，或者这次复盘看到了什么。"
               rows="10"
             />
+            <div class="record-image-toolbar">
+              <button
+                class="ghost-action"
+                type="button"
+                :disabled="isImportingImages('lab-create') || newLabRecordImages.length >= MAX_RECORD_IMAGES"
+                @click="openImageImporter('lab-create')"
+              >
+                {{ isImportingImages('lab-create') ? '导入中...' : '导入图片' }}
+              </button>
+              <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+            </div>
+            <div v-if="newLabRecordImages.length > 0" class="record-image-grid is-editor">
+              <div
+                v-for="image in newLabRecordImages"
+                :key="image.id"
+                class="record-image-card is-editor"
+              >
+                <button
+                  class="record-image-button"
+                  type="button"
+                  :aria-label="`预览 ${image.name}`"
+                  @click="openRecordImagePreview(image)"
+                >
+                  <img :src="image.dataUrl" :alt="image.name" />
+                </button>
+                <button
+                  class="record-image-remove"
+                  type="button"
+                  @click="removeImportedImage('lab-create', image.id)"
+                >
+                  移除
+                </button>
+              </div>
+            </div>
             <label class="branch-field">
               <span>归属分支</span>
               <select v-model="newLabRecordBranchValue" class="branch-select">
@@ -7893,6 +8432,40 @@ onBeforeUnmount(() => {
               class="journal-input edit-input"
               rows="10"
             />
+            <div class="record-image-toolbar">
+              <button
+                class="ghost-action"
+                type="button"
+                :disabled="isImportingImages('lab-edit') || editingLabRecordImages.length >= MAX_RECORD_IMAGES"
+                @click="openImageImporter('lab-edit')"
+              >
+                {{ isImportingImages('lab-edit') ? '导入中...' : '导入图片' }}
+              </button>
+              <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+            </div>
+            <div v-if="editingLabRecordImages.length > 0" class="record-image-grid is-editor">
+              <div
+                v-for="image in editingLabRecordImages"
+                :key="image.id"
+                class="record-image-card is-editor"
+              >
+                <button
+                  class="record-image-button"
+                  type="button"
+                  :aria-label="`预览 ${image.name}`"
+                  @click="openRecordImagePreview(image)"
+                >
+                  <img :src="image.dataUrl" :alt="image.name" />
+                </button>
+                <button
+                  class="record-image-remove"
+                  type="button"
+                  @click="removeImportedImage('lab-edit', image.id)"
+                >
+                  移除
+                </button>
+              </div>
+            </div>
             <label class="branch-field">
               <span>归属分支</span>
               <select v-model="editingLabRecordBranchValue" class="branch-select">
@@ -8251,6 +8824,47 @@ onBeforeUnmount(() => {
         {{ item.label }}
       </button>
     </section>
+
+    <input
+      ref="imageImportInputRef"
+      class="visually-hidden-input"
+      type="file"
+      accept="image/*"
+      multiple
+      @change="handleImageImportChange"
+    />
+
+    <div
+      v-if="recordImagePreview"
+      class="image-preview-backdrop"
+      role="presentation"
+      @click="closeRecordImagePreview"
+    >
+      <section
+        class="image-preview-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="image-preview-title"
+        @click.stop
+      >
+        <div class="image-preview-header">
+          <div>
+            <p class="eyebrow">图片预览</p>
+            <h2 id="image-preview-title">{{ recordImagePreview.name }}</h2>
+            <small>{{ recordImagePreview.width }} × {{ recordImagePreview.height }}</small>
+          </div>
+          <button class="panel-close" type="button" @click="closeRecordImagePreview">
+            关闭
+          </button>
+        </div>
+
+        <img
+          class="image-preview-image"
+          :src="recordImagePreview.dataUrl"
+          :alt="recordImagePreview.name"
+        />
+      </section>
+    </div>
 
     <div
       v-if="reminderComposerOpen && reminderTarget"

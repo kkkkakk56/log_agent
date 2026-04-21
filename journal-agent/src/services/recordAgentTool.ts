@@ -675,6 +675,7 @@ const executeKnowledgeCreateTool = (args: KnowledgeCreateArgs): ToolExecutionRes
     content: args.content,
     sourceUrl: args.sourceUrl ?? '',
     tags: normalizeTags(args.tags ?? []),
+    images: [],
   });
 
   if (!note) {
@@ -735,6 +736,7 @@ const executeKnowledgeUpdateTool = (args: KnowledgeUpdateArgs): ToolExecutionRes
     content: nextContent,
     sourceUrl: args.clearSourceUrl ? '' : args.sourceUrl ?? note.sourceUrl,
     tags: args.tags ? normalizeTags(args.tags) : note.tags,
+    images: note.images,
   });
 
   if (!updatedNote) {
@@ -785,6 +787,7 @@ const executeLabCreateTool = (args: LabCreateArgs): ToolExecutionResult => {
     content: args.content,
     type: args.type,
     tags: normalizeTags(args.tags ?? []),
+    images: [],
   });
 
   if (!record) {
@@ -846,6 +849,7 @@ const executeLabUpdateTool = (args: LabUpdateArgs): ToolExecutionResult => {
     content: nextContent,
     type: args.type ?? record.type,
     tags: args.tags ? normalizeTags(args.tags) : record.tags,
+    images: record.images,
   });
 
   if (!updatedRecord) {

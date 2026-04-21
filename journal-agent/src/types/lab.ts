@@ -1,3 +1,5 @@
+import type { RecordImageAttachment } from './media';
+
 export type LabRecordType = 'operation' | 'review';
 
 export interface LabProject {
@@ -20,6 +22,7 @@ export interface LabRecord {
   content: string;
   type: LabRecordType;
   tags: string[];
+  images: RecordImageAttachment[];
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;

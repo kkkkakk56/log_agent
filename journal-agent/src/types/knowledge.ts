@@ -1,3 +1,5 @@
+import type { RecordImageAttachment } from './media';
+
 export interface KnowledgeBase {
   id: string;
   name: string;
@@ -18,6 +20,7 @@ export interface KnowledgeNote {
   content: string;
   sourceUrl: string;
   tags: string[];
+  images: RecordImageAttachment[];
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;

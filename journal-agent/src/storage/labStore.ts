@@ -1,4 +1,5 @@
 import type { LabProject, LabRecord, LabRecordType } from '../types/lab';
+import { normalizeRecordImages } from '../utils/recordImages';
 import { deleteBranchesForContainer, getRecordBranches } from './branchStore';
 
 const PROJECTS_STORAGE_KEY = 'journal-agent.lab.projects.v1';
@@ -71,6 +72,7 @@ const parseLabRecord = (value: unknown): LabRecord | null => {
     content: value.content,
     type: value.type,
     tags: value.tags,
+    images: normalizeRecordImages(value.images),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     deletedAt: value.deletedAt,
@@ -306,7 +308,7 @@ export const deleteLabProject = (id: string): void => {
 
 export const createLabRecord = (
   projectId: string,
-  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags' | 'branchId'>,
+  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags' | 'branchId' | 'images'>,
 ): LabRecord | null => {
   const activeProject = getLabProjects().find((project) => project.id === projectId);
   const normalizedContent = fields.content.trim();
@@ -331,6 +333,7 @@ export const createLabRecord = (
     content: normalizedContent,
     type: fields.type,
     tags: normalizeTags(fields.tags),
+    images: normalizeRecordImages(fields.images),
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -347,7 +350,7 @@ export const createLabRecord = (
 
 export const updateLabRecord = (
   id: string,
-  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags' | 'branchId'>,
+  fields: Pick<LabRecord, 'title' | 'content' | 'type' | 'tags' | 'branchId' | 'images'>,
 ): LabRecord | null => {
   const normalizedContent = fields.content.trim();
 
@@ -378,6 +381,7 @@ export const updateLabRecord = (
     content: normalizedContent,
     type: fields.type,
     tags: normalizeTags(fields.tags),
+    images: normalizeRecordImages(fields.images),
     updatedAt: new Date().toISOString(),
   };
   const nextRecords = [...records];
