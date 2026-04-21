@@ -154,6 +154,47 @@ type LabInspectorMode =
   | 'record-edit'
   | 'record-create';
 type BranchFilterId = 'all' | 'ungrouped' | string;
+type CardActionId = 'flag' | 'pin' | 'todo' | 'reminder' | 'edit' | 'delete';
+
+type CardActionMenuTarget =
+  | {
+      kind: 'journal';
+      entryId: string;
+    }
+  | {
+      kind: 'knowledge';
+      noteId: string;
+    }
+  | {
+      kind: 'lab';
+      recordId: string;
+    };
+
+type ResolvedCardActionMenuTarget =
+  | {
+      kind: 'journal';
+      record: JournalEntry;
+    }
+  | {
+      kind: 'knowledge';
+      record: KnowledgeNote;
+    }
+  | {
+      kind: 'lab';
+      record: LabRecord;
+    };
+
+interface CardActionMenuItem {
+  id: CardActionId;
+  label: string;
+  tone?: 'danger';
+}
+
+interface CardActionMenuPlacement {
+  top: number;
+  left: number;
+  transformOrigin: string;
+}
 
 interface ParkSummary {
   id: ActivePark;
@@ -375,6 +416,10 @@ const highlightedReminderTarget = ref<{
 } | null>(null);
 const highlightedTodoId = ref<string | null>(null);
 const expandedJournalEntryIds = ref<Set<string>>(new Set());
+const cardActionMenuTarget = ref<CardActionMenuTarget | null>(null);
+const cardActionMenuAnchorElement = ref<HTMLElement | null>(null);
+const cardActionMenuPanel = ref<HTMLElement | null>(null);
+const cardActionMenuPlacement = ref<CardActionMenuPlacement | null>(null);
 const todoStatusMessage = ref('');
 const todoCompletionDraft = ref<TodoMark | null>(null);
 const todoCompletionNote = ref('');
@@ -624,6 +669,174 @@ const selectedLabRecord = computed(
     ) ??
     null,
 );
+
+const resolvedCardActionMenuTarget = computed<ResolvedCardActionMenuTarget | null>(() => {
+  const activeTarget = cardActionMenuTarget.value;
+
+  if (!activeTarget) {
+    return null;
+  }
+
+  if (activeTarget.kind === 'journal') {
+    const record = entries.value.find((entry) => entry.id === activeTarget.entryId) ?? null;
+
+    return record
+      ? {
+          kind: 'journal',
+          record,
+        }
+      : null;
+  }
+
+  if (activeTarget.kind === 'knowledge') {
+    const record = knowledgeNotes.value.find((note) => note.id === activeTarget.noteId) ?? null;
+
+    return record
+      ? {
+          kind: 'knowledge',
+          record,
+        }
+      : null;
+  }
+
+  const record = labRecords.value.find((item) => item.id === activeTarget.recordId) ?? null;
+
+  return record
+    ? {
+        kind: 'lab',
+        record,
+      }
+    : null;
+});
+
+const cardActionMenuTitle = computed(() => {
+  const target = resolvedCardActionMenuTarget.value;
+
+  if (!target) {
+    return '';
+  }
+
+  return target.record.title || '未命名记录';
+});
+
+const cardActionMenuStyle = computed<CSSProperties>(() => {
+  const placement = cardActionMenuPlacement.value;
+
+  if (!placement) {
+    return {
+      visibility: 'hidden',
+      pointerEvents: 'none',
+    };
+  }
+
+  return {
+    top: `${placement.top}px`,
+    left: `${placement.left}px`,
+    transformOrigin: placement.transformOrigin,
+  };
+});
+
+const cardActionMenuItems = computed<CardActionMenuItem[]>(() => {
+  const target = resolvedCardActionMenuTarget.value;
+
+  if (!target) {
+    return [];
+  }
+
+  if (target.kind === 'journal') {
+    const cardTodo = getCardTodo('journal', target.record.id);
+
+    return [
+      {
+        id: 'flag',
+        label: isFlagged(target.record.flaggedAt) ? '取消 Flag' : 'Flag',
+      },
+      {
+        id: 'todo',
+        label:
+          cardTodo === null
+            ? '待办'
+            : cardTodo.status === 'open'
+              ? '取消待办'
+              : '恢复待办',
+      },
+      {
+        id: 'reminder',
+        label: '提醒',
+      },
+      {
+        id: 'edit',
+        label: '编辑',
+      },
+      {
+        id: 'delete',
+        label: '删除',
+        tone: 'danger',
+      },
+    ];
+  }
+
+  if (target.kind === 'knowledge') {
+    return [
+      {
+        id: 'flag',
+        label: isFlagged(target.record.flaggedAt) ? '取消 Flag' : 'Flag',
+      },
+      {
+        id: 'pin',
+        label: isPinned(target.record.pinnedAt) ? '取消置顶' : '置顶',
+      },
+      {
+        id: 'reminder',
+        label: '提醒',
+      },
+      {
+        id: 'edit',
+        label: '编辑',
+      },
+      {
+        id: 'delete',
+        label: '删除',
+        tone: 'danger',
+      },
+    ];
+  }
+
+  const cardTodo = getCardTodo('project', target.record.id);
+
+  return [
+    {
+      id: 'flag',
+      label: isFlagged(target.record.flaggedAt) ? '取消 Flag' : 'Flag',
+    },
+    {
+      id: 'pin',
+      label: isPinned(target.record.pinnedAt) ? '取消置顶' : '置顶',
+    },
+    {
+      id: 'todo',
+      label:
+        cardTodo === null
+          ? '待办'
+          : cardTodo.status === 'open'
+            ? '取消待办'
+            : '恢复待办',
+    },
+    {
+      id: 'reminder',
+      label: '提醒',
+    },
+    {
+      id: 'edit',
+      label: '编辑',
+    },
+    {
+      id: 'delete',
+      label: '删除',
+      tone: 'danger',
+    },
+  ];
+});
 
 const labBranchSelectOptions = computed(() =>
   buildBranchSelectOptions(
@@ -1603,15 +1816,6 @@ function createTodoForTarget(target: TodoTargetDraft) {
   refreshTodos();
 }
 
-function createJournalTodo(entry: JournalEntry) {
-  createTodoForTarget({
-    parkType: 'journal',
-    noteId: entry.id,
-    title: entry.title,
-    content: entry.content,
-  });
-}
-
 function createLabTodo(record: LabRecord) {
   createTodoForTarget({
     parkType: 'project',
@@ -1619,6 +1823,47 @@ function createLabTodo(record: LabRecord) {
     title: record.title,
     content: record.content,
   });
+}
+
+function toggleCardTodoFromMenu(
+  parkType: TodoParkType,
+  noteId: string,
+  title: string,
+) {
+  const existingCardTodo = getCardTodo(parkType, noteId);
+
+  if (!existingCardTodo) {
+    const todo = createTodo({
+      parkType,
+      noteId,
+      targetType: 'card',
+    });
+
+    if (!todo) {
+      todoStatusMessage.value = '待办创建失败，请稍后再试。';
+      return;
+    }
+
+    highlightedTodoId.value = todo.id;
+    todoStatusMessage.value = `已把「${title}」标记为待办。`;
+    refreshTodos();
+    return;
+  }
+
+  if (existingCardTodo.status === 'open') {
+    if (
+      !removeTodoMark(
+        existingCardTodo,
+        `已取消「${title || '这张卡片'}」待办。`,
+      )
+    ) {
+      todoStatusMessage.value = '待办取消失败，请稍后再试。';
+    }
+
+    return;
+  }
+
+  toggleTodoStatus(existingCardTodo);
 }
 
 function clearTodoCompletionTimer() {
@@ -2724,6 +2969,144 @@ function isPinned(pinnedAt: string | null | undefined): boolean {
 
 function isFlagged(flaggedAt: string | null | undefined): boolean {
   return Boolean(flaggedAt);
+}
+
+function isCardActionMenuOpenFor(target: CardActionMenuTarget): boolean {
+  const activeTarget = cardActionMenuTarget.value;
+
+  if (!activeTarget) {
+    return false;
+  }
+
+  if (target.kind === 'journal') {
+    return activeTarget.kind === 'journal' && activeTarget.entryId === target.entryId;
+  }
+
+  if (target.kind === 'knowledge') {
+    return activeTarget.kind === 'knowledge' && activeTarget.noteId === target.noteId;
+  }
+
+  return activeTarget.kind === 'lab' && activeTarget.recordId === target.recordId;
+}
+
+function getCardActionMenuTriggerElement(event: Event): HTMLElement | null {
+  return event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+}
+
+function positionCardActionMenu() {
+  const anchorElement = cardActionMenuAnchorElement.value;
+  const panelElement = cardActionMenuPanel.value;
+
+  if (!anchorElement || !panelElement) {
+    cardActionMenuPlacement.value = null;
+    return;
+  }
+
+  const anchorRect = anchorElement.getBoundingClientRect();
+  const panelRect = panelElement.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const viewportMargin = 12;
+  const offset = 8;
+  const spaceBelow = viewportHeight - anchorRect.bottom - viewportMargin;
+  const spaceAbove = anchorRect.top - viewportMargin;
+  const shouldOpenUpward = panelRect.height > spaceBelow && spaceAbove > spaceBelow;
+
+  let left = anchorRect.right - panelRect.width;
+  left = Math.min(
+    Math.max(left, viewportMargin),
+    viewportWidth - panelRect.width - viewportMargin,
+  );
+
+  let top = shouldOpenUpward
+    ? anchorRect.top - panelRect.height - offset
+    : anchorRect.bottom + offset;
+  top = Math.min(
+    Math.max(top, viewportMargin),
+    viewportHeight - panelRect.height - viewportMargin,
+  );
+
+  cardActionMenuPlacement.value = {
+    top,
+    left,
+    transformOrigin: `right ${shouldOpenUpward ? 'bottom' : 'top'}`,
+  };
+}
+
+function handleCardActionMenuViewportChange() {
+  if (!resolvedCardActionMenuTarget.value) {
+    return;
+  }
+
+  void nextTick(positionCardActionMenu);
+}
+
+function handleCardActionMenuPointerDown(event: PointerEvent) {
+  if (!resolvedCardActionMenuTarget.value) {
+    return;
+  }
+
+  const targetNode = event.target;
+
+  if (!(targetNode instanceof Node)) {
+    closeCardActionMenu();
+    return;
+  }
+
+  if (cardActionMenuPanel.value?.contains(targetNode)) {
+    return;
+  }
+
+  if (cardActionMenuAnchorElement.value?.contains(targetNode)) {
+    return;
+  }
+
+  closeCardActionMenu();
+}
+
+function handleCardActionMenuEscape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !resolvedCardActionMenuTarget.value) {
+    return;
+  }
+
+  closeCardActionMenu();
+}
+
+function openCardActionMenu(target: CardActionMenuTarget, event: Event) {
+  const triggerElement = getCardActionMenuTriggerElement(event);
+
+  if (!triggerElement) {
+    cardActionMenuTarget.value = target;
+    cardActionMenuAnchorElement.value = null;
+    cardActionMenuPlacement.value = null;
+    return;
+  }
+
+  const triggerRect = triggerElement.getBoundingClientRect();
+
+  cardActionMenuTarget.value = target;
+  cardActionMenuAnchorElement.value = triggerElement;
+  cardActionMenuPlacement.value = {
+    top: triggerRect.bottom + 8,
+    left: Math.max(triggerRect.right - 216, 12),
+    transformOrigin: 'right top',
+  };
+  void nextTick(positionCardActionMenu);
+}
+
+function toggleCardActionMenu(target: CardActionMenuTarget, event: Event) {
+  if (isCardActionMenuOpenFor(target)) {
+    closeCardActionMenu();
+    return;
+  }
+
+  openCardActionMenu(target, event);
+}
+
+function closeCardActionMenu() {
+  cardActionMenuTarget.value = null;
+  cardActionMenuAnchorElement.value = null;
+  cardActionMenuPlacement.value = null;
 }
 
 function refreshRecordBranches() {
@@ -3990,6 +4373,102 @@ function toggleLabRecordFlag(record: LabRecord) {
   refreshLabData();
 }
 
+function runCardAction(actionId: CardActionId) {
+  const target = resolvedCardActionMenuTarget.value;
+
+  if (!target) {
+    closeCardActionMenu();
+    return;
+  }
+
+  closeCardActionMenu();
+
+  if (target.kind === 'journal') {
+    if (actionId === 'flag') {
+      toggleJournalEntryFlag(target.record);
+      return;
+    }
+
+    if (actionId === 'todo') {
+      toggleCardTodoFromMenu('journal', target.record.id, target.record.title);
+      return;
+    }
+
+    if (actionId === 'reminder') {
+      openJournalReminderComposer(target.record);
+      return;
+    }
+
+    if (actionId === 'edit') {
+      startEditing(target.record);
+      return;
+    }
+
+    if (actionId === 'delete') {
+      removeEntry(target.record);
+    }
+
+    return;
+  }
+
+  if (target.kind === 'knowledge') {
+    if (actionId === 'flag') {
+      toggleKnowledgeNoteFlag(target.record);
+      return;
+    }
+
+    if (actionId === 'pin') {
+      toggleKnowledgeNotePinned(target.record);
+      return;
+    }
+
+    if (actionId === 'reminder') {
+      openKnowledgeReminderComposer(target.record);
+      return;
+    }
+
+    if (actionId === 'edit') {
+      startKnowledgeNoteEditing(target.record);
+      return;
+    }
+
+    if (actionId === 'delete') {
+      removeKnowledgeNote(target.record);
+    }
+
+    return;
+  }
+
+  if (actionId === 'flag') {
+    toggleLabRecordFlag(target.record);
+    return;
+  }
+
+  if (actionId === 'pin') {
+    toggleLabRecordPinned(target.record);
+    return;
+  }
+
+  if (actionId === 'todo') {
+    toggleCardTodoFromMenu('project', target.record.id, target.record.title);
+    return;
+  }
+
+  if (actionId === 'reminder') {
+    openLabReminderComposer(target.record);
+    return;
+  }
+
+  if (actionId === 'edit') {
+    startLabRecordEditing(target.record);
+    return;
+  }
+
+  if (actionId === 'delete') {
+    removeLabRecord(target.record);
+  }
+}
+
 function refreshAgentConversations() {
   agentConversations.value = getAgentConversations();
 
@@ -4478,7 +4957,11 @@ let removeReminderNotificationActionListener: (() => void) | null = null;
 
 onMounted(() => {
   document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
+  document.addEventListener('pointerdown', handleCardActionMenuPointerDown);
+  document.addEventListener('keydown', handleCardActionMenuEscape);
   document.addEventListener('visibilitychange', handleDocumentVisibilityChange);
+  window.addEventListener('scroll', handleCardActionMenuViewportChange, true);
+  window.addEventListener('resize', handleCardActionMenuViewportChange);
   window.addEventListener('resize', handleAgentViewportResize);
   void nextTick(initializeAgentFabPosition);
   void syncDailyJournalReminderOnLaunch();
@@ -4498,7 +4981,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', captureTodoSelectionFromWindow);
+  document.removeEventListener('pointerdown', handleCardActionMenuPointerDown);
+  document.removeEventListener('keydown', handleCardActionMenuEscape);
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange);
+  window.removeEventListener('scroll', handleCardActionMenuViewportChange, true);
+  window.removeEventListener('resize', handleCardActionMenuViewportChange);
   window.removeEventListener('resize', handleAgentViewportResize);
   removeReminderNotificationActionListener?.();
   removeReminderNotificationActionListener = null;
@@ -4753,8 +5240,21 @@ onBeforeUnmount(() => {
               </span>
               <div class="entry-title-row">
                 <strong v-html="result.titleHtml"></strong>
-                <div v-if="isFlagged(result.entry.flaggedAt)" class="entry-title-badges">
-                  <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                <div class="entry-title-actions">
+                  <div v-if="isFlagged(result.entry.flaggedAt)" class="entry-title-badges">
+                    <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                  </div>
+                  <button
+                    class="card-menu-trigger"
+                    :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'journal', entryId: result.entry.id }) }"
+                    type="button"
+                    aria-haspopup="menu"
+                    :aria-expanded="isCardActionMenuOpenFor({ kind: 'journal', entryId: result.entry.id })"
+                    aria-label="打开这条心记的操作菜单"
+                    @click.stop="toggleCardActionMenu({ kind: 'journal', entryId: result.entry.id }, $event)"
+                  >
+                    ⋯
+                  </button>
                 </div>
               </div>
               <p
@@ -4811,40 +5311,6 @@ onBeforeUnmount(() => {
                   未来
                 </i>
               </span>
-              <div class="entry-footer-actions">
-                <button
-                  class="ghost-action reminder-action"
-                  type="button"
-                  @click="openJournalReminderComposer(result.entry)"
-                >
-                  提醒
-                </button>
-                <button
-                  class="ghost-action reminder-action"
-                  type="button"
-                  @pointerdown="captureTodoSelectionFromWindow"
-                  @click="createJournalTodo(result.entry)"
-                >
-                  待办
-                </button>
-                <button
-                  class="ghost-action reminder-action"
-                  type="button"
-                  @click="toggleJournalEntryFlag(result.entry)"
-                >
-                  {{ isFlagged(result.entry.flaggedAt) ? '取消 Flag' : 'Flag' }}
-                </button>
-                <button
-                  class="ghost-action reminder-action"
-                  type="button"
-                  @click="startEditing(result.entry)"
-                >
-                  编辑
-                </button>
-                <button class="delete-action" type="button" @click="removeEntry(result.entry)">
-                  删除
-                </button>
-              </div>
             </div>
           </template>
         </article>
@@ -4985,8 +5451,21 @@ onBeforeUnmount(() => {
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <div class="entry-title-row">
                   <strong>{{ entry.title }}</strong>
-                  <div v-if="isFlagged(entry.flaggedAt)" class="entry-title-badges">
-                    <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                  <div class="entry-title-actions">
+                    <div v-if="isFlagged(entry.flaggedAt)" class="entry-title-badges">
+                      <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                    </div>
+                    <button
+                      class="card-menu-trigger"
+                      :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'journal', entryId: entry.id }) }"
+                      type="button"
+                      aria-haspopup="menu"
+                      :aria-expanded="isCardActionMenuOpenFor({ kind: 'journal', entryId: entry.id })"
+                      aria-label="打开这条心记的操作菜单"
+                      @click.stop="toggleCardActionMenu({ kind: 'journal', entryId: entry.id }, $event)"
+                    >
+                      ⋯
+                    </button>
                   </div>
                 </div>
                 <p
@@ -5017,32 +5496,6 @@ onBeforeUnmount(() => {
                     未来
                   </i>
                 </span>
-                <div class="entry-footer-actions">
-                  <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
-                    提醒
-                  </button>
-                  <button
-                    class="ghost-action reminder-action"
-                    type="button"
-                    @pointerdown="captureTodoSelectionFromWindow"
-                    @click="createJournalTodo(entry)"
-                  >
-                    待办
-                  </button>
-                  <button
-                    class="ghost-action reminder-action"
-                    type="button"
-                    @click="toggleJournalEntryFlag(entry)"
-                  >
-                    {{ isFlagged(entry.flaggedAt) ? '取消 Flag' : 'Flag' }}
-                  </button>
-                  <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
-                    编辑
-                  </button>
-                  <button class="delete-action" type="button" @click="removeEntry(entry)">
-                    删除
-                  </button>
-                </div>
               </div>
             </template>
           </article>
@@ -5095,8 +5548,21 @@ onBeforeUnmount(() => {
               <span class="entry-time">创建 {{ formatEntryTime(item.entry.createdAt) }}</span>
               <div class="entry-title-row">
                 <strong>{{ item.entry.title }}</strong>
-                <div v-if="isFlagged(item.entry.flaggedAt)" class="entry-title-badges">
-                  <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                <div class="entry-title-actions">
+                  <div v-if="isFlagged(item.entry.flaggedAt)" class="entry-title-badges">
+                    <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                  </div>
+                  <button
+                    class="card-menu-trigger"
+                    :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'journal', entryId: item.entry.id }) }"
+                    type="button"
+                    aria-haspopup="menu"
+                    :aria-expanded="isCardActionMenuOpenFor({ kind: 'journal', entryId: item.entry.id })"
+                    aria-label="打开这条心记的操作菜单"
+                    @click.stop="toggleCardActionMenu({ kind: 'journal', entryId: item.entry.id }, $event)"
+                  >
+                    ⋯
+                  </button>
                 </div>
               </div>
                 <p
@@ -5192,8 +5658,21 @@ onBeforeUnmount(() => {
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
                 <div class="entry-title-row">
                   <strong>{{ entry.title }}</strong>
-                  <div v-if="isFlagged(entry.flaggedAt)" class="entry-title-badges">
-                    <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                  <div class="entry-title-actions">
+                    <div v-if="isFlagged(entry.flaggedAt)" class="entry-title-badges">
+                      <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                    </div>
+                    <button
+                      class="card-menu-trigger"
+                      :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'journal', entryId: entry.id }) }"
+                      type="button"
+                      aria-haspopup="menu"
+                      :aria-expanded="isCardActionMenuOpenFor({ kind: 'journal', entryId: entry.id })"
+                      aria-label="打开这条心记的操作菜单"
+                      @click.stop="toggleCardActionMenu({ kind: 'journal', entryId: entry.id }, $event)"
+                    >
+                      ⋯
+                    </button>
                   </div>
                 </div>
                 <p
@@ -5224,32 +5703,6 @@ onBeforeUnmount(() => {
                     未来
                   </i>
                 </span>
-                <div class="entry-footer-actions">
-                  <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
-                    提醒
-                  </button>
-                  <button
-                    class="ghost-action reminder-action"
-                    type="button"
-                    @pointerdown="captureTodoSelectionFromWindow"
-                    @click="createJournalTodo(entry)"
-                  >
-                    待办
-                  </button>
-                  <button
-                    class="ghost-action reminder-action"
-                    type="button"
-                    @click="toggleJournalEntryFlag(entry)"
-                  >
-                    {{ isFlagged(entry.flaggedAt) ? '取消 Flag' : 'Flag' }}
-                  </button>
-                  <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
-                    编辑
-                  </button>
-                  <button class="delete-action" type="button" @click="removeEntry(entry)">
-                    删除
-                  </button>
-                </div>
               </div>
             </template>
           </article>
@@ -5305,8 +5758,21 @@ onBeforeUnmount(() => {
               </span>
               <div class="entry-title-row">
                 <strong>{{ item.entry.title }}</strong>
-                <div v-if="isFlagged(item.entry.flaggedAt)" class="entry-title-badges">
-                  <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                <div class="entry-title-actions">
+                  <div v-if="isFlagged(item.entry.flaggedAt)" class="entry-title-badges">
+                    <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                  </div>
+                  <button
+                    class="card-menu-trigger"
+                    :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'journal', entryId: item.entry.id }) }"
+                    type="button"
+                    aria-haspopup="menu"
+                    :aria-expanded="isCardActionMenuOpenFor({ kind: 'journal', entryId: item.entry.id })"
+                    aria-label="打开这条心记的操作菜单"
+                    @click.stop="toggleCardActionMenu({ kind: 'journal', entryId: item.entry.id }, $event)"
+                  >
+                    ⋯
+                  </button>
                 </div>
               </div>
               <p
@@ -6065,26 +6531,42 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else class="knowledge-note-items">
-              <button
+              <article
                 v-for="note in activeKnowledgeNotes"
                 :key="note.id"
-                type="button"
                 class="knowledge-note-list-item"
                 :class="{
                   active: selectedKnowledgeNoteId === note.id,
                   'is-flagged': isFlagged(note.flaggedAt),
                   'is-pinned': isPinned(note.pinnedAt),
                 }"
+                role="button"
+                tabindex="0"
                 @click="selectKnowledgeNote(note)"
+                @keydown.enter.prevent="selectKnowledgeNote(note)"
+                @keydown.space.prevent="selectKnowledgeNote(note)"
               >
                 <span class="entry-time">
                   {{ getDateGroupLabel(note.updatedAt) }} · {{ formatEntryTime(note.updatedAt) }}
                 </span>
                 <div class="list-title-row">
                   <strong>{{ note.title }}</strong>
-                  <div class="list-title-badges">
-                    <span v-if="isFlagged(note.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
-                    <span v-if="isPinned(note.pinnedAt)" class="pin-pill">置顶</span>
+                  <div class="entry-title-actions">
+                    <div class="list-title-badges">
+                      <span v-if="isFlagged(note.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
+                      <span v-if="isPinned(note.pinnedAt)" class="pin-pill">置顶</span>
+                    </div>
+                    <button
+                      class="card-menu-trigger"
+                      :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'knowledge', noteId: note.id }) }"
+                      type="button"
+                      aria-haspopup="menu"
+                      :aria-expanded="isCardActionMenuOpenFor({ kind: 'knowledge', noteId: note.id })"
+                      aria-label="打开这条知识笔记的操作菜单"
+                      @click.stop="toggleCardActionMenu({ kind: 'knowledge', noteId: note.id }, $event)"
+                    >
+                      ⋯
+                    </button>
                   </div>
                 </div>
                 <p>{{ note.content }}</p>
@@ -6092,7 +6574,7 @@ onBeforeUnmount(() => {
                   {{ note.branchId ? getBranchPathLabel(activeKnowledgeBaseBranches, note.branchId) : '未分组' }}
                 </small>
                 <small v-if="note.tags.length > 0">{{ note.tags.join(' / ') }}</small>
-              </button>
+              </article>
             </div>
           </template>
 
@@ -6657,10 +7139,9 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else class="knowledge-note-items">
-              <button
+              <article
                 v-for="record in activeOpenLabRecords"
                 :key="record.id"
-                type="button"
                 class="lab-record-list-item"
                 :class="[
                   { active: selectedLabRecordId === record.id },
@@ -6670,7 +7151,11 @@ onBeforeUnmount(() => {
                   `is-${record.type}`,
                 ]"
                 :data-todo-source="`project:${record.id}`"
+                role="button"
+                tabindex="0"
                 @click="selectLabRecord(record)"
+                @keydown.enter.prevent="selectLabRecord(record)"
+                @keydown.space.prevent="selectLabRecord(record)"
               >
                 <div class="lab-record-list-header">
                   <span class="entry-time">
@@ -6688,6 +7173,17 @@ onBeforeUnmount(() => {
                     <span class="record-type-pill" :class="`is-${record.type}`">
                       {{ getLabRecordTypeLabel(record.type) }}
                     </span>
+                    <button
+                      class="card-menu-trigger"
+                      :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'lab', recordId: record.id }) }"
+                      type="button"
+                      aria-haspopup="menu"
+                      :aria-expanded="isCardActionMenuOpenFor({ kind: 'lab', recordId: record.id })"
+                      aria-label="打开这条做记记录的操作菜单"
+                      @click.stop="toggleCardActionMenu({ kind: 'lab', recordId: record.id }, $event)"
+                    >
+                      ⋯
+                    </button>
                   </div>
                 </div>
                 <strong>{{ record.title }}</strong>
@@ -6696,7 +7192,7 @@ onBeforeUnmount(() => {
                   {{ record.branchId ? getBranchPathLabel(activeLabProjectBranches, record.branchId) : '未分组' }}
                 </small>
                 <small v-if="record.tags.length > 0">{{ record.tags.join(' / ') }}</small>
-              </button>
+              </article>
             </div>
 
             <section
@@ -6717,10 +7213,9 @@ onBeforeUnmount(() => {
                 </button>
               </div>
               <div v-if="labCompletedOpen" class="knowledge-note-items">
-                <button
+                <article
                   v-for="item in activeCompletedLabRecordItems"
                   :key="item.todo.id"
-                  type="button"
                   class="lab-record-list-item is-todo-done"
                   :class="[
                     `is-${item.record.type}`,
@@ -6729,7 +7224,11 @@ onBeforeUnmount(() => {
                   ]"
                   :data-todo-source="`project:${item.record.id}`"
                   :data-todo-target="item.todo.id"
+                  role="button"
+                  tabindex="0"
                   @click="selectLabRecord(item.record)"
+                  @keydown.enter.prevent="selectLabRecord(item.record)"
+                  @keydown.space.prevent="selectLabRecord(item.record)"
                 >
                   <div class="lab-record-list-header">
                     <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
@@ -6743,6 +7242,17 @@ onBeforeUnmount(() => {
                       >
                         {{ getTodoStatusIcon(item.todo) }}
                       </button>
+                      <button
+                        class="card-menu-trigger"
+                        :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'lab', recordId: item.record.id }) }"
+                        type="button"
+                        aria-haspopup="menu"
+                        :aria-expanded="isCardActionMenuOpenFor({ kind: 'lab', recordId: item.record.id })"
+                        aria-label="打开这条做记记录的操作菜单"
+                        @click.stop="toggleCardActionMenu({ kind: 'lab', recordId: item.record.id }, $event)"
+                      >
+                        ⋯
+                      </button>
                     </div>
                   </div>
                   <strong>{{ item.record.title }}</strong>
@@ -6750,7 +7260,7 @@ onBeforeUnmount(() => {
                   <small>
                     {{ item.record.branchId ? getBranchPathLabel(activeLabProjectBranches, item.record.branchId) : '未分组' }}
                   </small>
-                </button>
+                </article>
               </div>
             </section>
           </template>
@@ -7222,6 +7732,28 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
+    </section>
+
+    <section
+      v-if="resolvedCardActionMenuTarget"
+      ref="cardActionMenuPanel"
+      class="card-action-menu-popover"
+      :style="cardActionMenuStyle"
+      :aria-label="`${cardActionMenuTitle} 的操作菜单`"
+      role="menu"
+      @click.stop
+    >
+      <button
+        v-for="item in cardActionMenuItems"
+        :key="item.id"
+        class="card-action-menu-item"
+        :class="{ 'is-danger': item.tone === 'danger' }"
+        type="button"
+        role="menuitem"
+        @click="runCardAction(item.id)"
+      >
+        {{ item.label }}
+      </button>
     </section>
 
     <div
