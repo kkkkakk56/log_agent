@@ -1467,6 +1467,12 @@ a { color: var(--accent); text-decoration: none; }
   text-align: left;
   transition: all 0.18s var(--motion-ease);
 }
+.list-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .knowledge-note-list-item strong {
   font-family: var(--font-serif);
   font-weight: 500;
@@ -1485,6 +1491,9 @@ a { color: var(--accent); text-decoration: none; }
 }
 .knowledge-note-list-item small { font-size: 11px; color: var(--ink-4); }
 .knowledge-note-list-item:hover { border-color: var(--line-strong); }
+.knowledge-note-list-item.is-pinned {
+  box-shadow: inset 0 0 0 1px rgba(223, 164, 77, 0.18);
+}
 .knowledge-note-list-item.active {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -1521,6 +1530,9 @@ a { color: var(--accent); text-decoration: none; }
 }
 .lab-record-list-item small { font-size: 11px; color: var(--ink-4); }
 .lab-record-list-item:hover { border-color: var(--line-strong); }
+.lab-record-list-item.is-pinned {
+  box-shadow: inset 0 0 0 1px rgba(223, 164, 77, 0.18);
+}
 .lab-record-list-item.is-operation { border-left-color: var(--lab-operation); }
 .lab-record-list-item.is-review { border-left-color: var(--lab-review); }
 .lab-record-list-item.active.is-operation {
@@ -1682,6 +1694,25 @@ a { color: var(--accent); text-decoration: none; }
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--ink-4);
+}
+.pin-pill,
+.pin-meta-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  color: #7d5524;
+  background: rgba(223, 164, 77, 0.14);
+  border: 1px solid rgba(223, 164, 77, 0.26);
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.pin-meta-label {
+  padding: 2px 8px;
+  font-size: 11px;
 }
 .tag-row {
   display: flex; flex-wrap: wrap; gap: 6px;

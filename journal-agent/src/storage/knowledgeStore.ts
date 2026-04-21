@@ -5,6 +5,7 @@ const BASES_STORAGE_KEY = 'journal-agent.knowledge.bases.v1';
 const NOTES_STORAGE_KEY = 'journal-agent.knowledge.notes.v1';
 const MAX_BASE_NAME_LENGTH = 40;
 const MAX_NOTE_TITLE_LENGTH = 80;
+export const MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE = 5;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -44,6 +45,9 @@ const parseKnowledgeNote = (value: unknown): KnowledgeNote | null => {
     typeof value.createdAt !== 'string' ||
     typeof value.updatedAt !== 'string' ||
     (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
+    (typeof value.pinnedAt !== 'string' &&
+      value.pinnedAt !== null &&
+      value.pinnedAt !== undefined) ||
     (typeof value.branchId !== 'string' &&
       value.branchId !== null &&
       value.branchId !== undefined)
@@ -55,6 +59,7 @@ const parseKnowledgeNote = (value: unknown): KnowledgeNote | null => {
     id: value.id,
     baseId: value.baseId,
     branchId: typeof value.branchId === 'string' ? value.branchId : null,
+    pinnedAt: typeof value.pinnedAt === 'string' ? value.pinnedAt : null,
     title: value.title,
     content: value.content,
     sourceUrl: value.sourceUrl,
@@ -135,11 +140,26 @@ const writeNotes = (notes: KnowledgeNote[]): boolean =>
   writeCollection(NOTES_STORAGE_KEY, notes);
 
 const sortByUpdatedAtDesc = <T extends { updatedAt: string }>(items: T[]): T[] =>
-  items.sort(
+  [...items].sort(
     (firstItem, secondItem) =>
       new Date(secondItem.updatedAt).getTime() -
       new Date(firstItem.updatedAt).getTime(),
   );
+
+const sortPinnedNotes = (notes: KnowledgeNote[]): KnowledgeNote[] =>
+  [...notes].sort((firstNote, secondNote) => {
+    const firstPinnedAt = firstNote.pinnedAt ? new Date(firstNote.pinnedAt).getTime() : 0;
+    const secondPinnedAt = secondNote.pinnedAt ? new Date(secondNote.pinnedAt).getTime() : 0;
+
+    if (firstPinnedAt !== secondPinnedAt) {
+      return secondPinnedAt - firstPinnedAt;
+    }
+
+    return (
+      new Date(secondNote.updatedAt).getTime() -
+      new Date(firstNote.updatedAt).getTime()
+    );
+  });
 
 const createNoteTitle = (content: string, title = ''): string => {
   const normalizedTitle = title.trim();
@@ -179,7 +199,7 @@ export const getKnowledgeBases = (): KnowledgeBase[] =>
   );
 
 export const getKnowledgeNotes = (baseId?: string): KnowledgeNote[] =>
-  sortByUpdatedAtDesc(
+  sortPinnedNotes(
     readNotes().filter(
       (note) =>
         note.deletedAt === null &&
@@ -300,6 +320,7 @@ export const createKnowledgeNote = (
     id: createId('knowledge-note'),
     baseId,
     branchId: fields.branchId,
+    pinnedAt: null,
     title: createNoteTitle(normalizedContent, fields.title),
     content: normalizedContent,
     sourceUrl: fields.sourceUrl.trim(),
@@ -366,6 +387,44 @@ export const updateKnowledgeNote = (
   touchKnowledgeBase(updatedNote.baseId, updatedNote.updatedAt);
 
   return updatedNote;
+};
+
+export const setKnowledgeNotePinned = (
+  id: string,
+  pinned: boolean,
+): KnowledgeNote | null => {
+  const notes = readNotes();
+  const noteIndex = notes.findIndex(
+    (note) => note.id === id && note.deletedAt === null,
+  );
+
+  if (noteIndex === -1) {
+    return null;
+  }
+
+  const currentNote = notes[noteIndex];
+
+  if (
+    pinned &&
+    currentNote.pinnedAt === null &&
+    notes.filter(
+      (note) =>
+        note.baseId === currentNote.baseId &&
+        note.deletedAt === null &&
+        note.pinnedAt !== null,
+    ).length >= MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE
+  ) {
+    return null;
+  }
+
+  const updatedNote: KnowledgeNote = {
+    ...currentNote,
+    pinnedAt: pinned ? currentNote.pinnedAt ?? new Date().toISOString() : null,
+  };
+  const nextNotes = [...notes];
+  nextNotes[noteIndex] = updatedNote;
+
+  return writeNotes(nextNotes) ? updatedNote : null;
 };
 
 export const deleteKnowledgeNote = (id: string): void => {

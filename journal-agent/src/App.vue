@@ -80,6 +80,7 @@ import {
   updateRecordBranch,
 } from './storage/branchStore';
 import {
+  MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE,
   createKnowledgeBase,
   clearKnowledgeNoteBranchAssignments,
   createKnowledgeNote,
@@ -87,10 +88,12 @@ import {
   deleteKnowledgeNote,
   getKnowledgeBases,
   getKnowledgeNotes,
+  setKnowledgeNotePinned,
   updateKnowledgeBase,
   updateKnowledgeNote,
 } from './storage/knowledgeStore';
 import {
+  MAX_PINNED_LAB_RECORDS_PER_PROJECT,
   clearLabRecordBranchAssignments,
   createLabProject,
   createLabRecord,
@@ -98,6 +101,7 @@ import {
   deleteLabRecord,
   getLabProjects,
   getLabRecords,
+  setLabRecordPinned,
   updateLabProject,
   updateLabRecord,
 } from './storage/labStore';
@@ -487,6 +491,10 @@ const activeKnowledgeNotes = computed(() =>
   ),
 );
 
+const activeKnowledgePinnedCount = computed(
+  () => activeKnowledgeBaseNotes.value.filter((note) => note.pinnedAt !== null).length,
+);
+
 const knowledgeBranchTreeItems = computed(() =>
   buildBranchTreeItems(
     activeKnowledgeBranches.value,
@@ -562,6 +570,10 @@ const activeLabRecords = computed(() =>
   ),
 );
 
+const activeLabPinnedCount = computed(
+  () => activeLabProjectRecords.value.filter((record) => record.pinnedAt !== null).length,
+);
+
 const labBranchTreeItems = computed(() =>
   buildBranchTreeItems(
     activeLabBranches.value,
@@ -590,7 +602,16 @@ const activeCompletedLabRecordItems = computed(() =>
       (item): item is { record: LabRecord; todo: TodoMark } =>
         item.todo?.status === 'done',
     )
-    .sort((firstItem, secondItem) => (secondItem.todo.doneAt ?? 0) - (firstItem.todo.doneAt ?? 0)),
+    .sort((firstItem, secondItem) => {
+      const firstPinned = isPinned(firstItem.record.pinnedAt);
+      const secondPinned = isPinned(secondItem.record.pinnedAt);
+
+      if (firstPinned !== secondPinned) {
+        return firstPinned ? -1 : 1;
+      }
+
+      return (secondItem.todo.doneAt ?? 0) - (firstItem.todo.doneAt ?? 0);
+    }),
 );
 
 const selectedLabRecord = computed(
@@ -2694,6 +2715,10 @@ function getLabRecordTypeLabel(type: LabRecordType): string {
   return LAB_RECORD_TYPE_META[type].label;
 }
 
+function isPinned(pinnedAt: string | null | undefined): boolean {
+  return Boolean(pinnedAt);
+}
+
 function refreshRecordBranches() {
   recordBranches.value = getRecordBranches({ includeArchived: true });
 }
@@ -3387,6 +3412,30 @@ function removeKnowledgeNote(note: KnowledgeNote) {
   refreshKnowledgeData();
 }
 
+function toggleKnowledgeNotePinned(note: KnowledgeNote) {
+  const shouldPin = !isPinned(note.pinnedAt);
+
+  if (
+    shouldPin &&
+    activeKnowledgePinnedCount.value >= MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE
+  ) {
+    window.alert(
+      `每个知识库最多置顶 ${MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE} 条笔记，请先取消其他置顶。`,
+    );
+    return;
+  }
+
+  const updatedNote = setKnowledgeNotePinned(note.id, shouldPin);
+
+  if (!updatedNote) {
+    window.alert(shouldPin ? '笔记置顶失败，请稍后再试。' : '取消置顶失败，请稍后再试。');
+    return;
+  }
+
+  selectedKnowledgeNoteId.value = updatedNote.id;
+  refreshKnowledgeData();
+}
+
 function resetNewLabProjectForm() {
   newLabProjectName.value = '';
   newLabProjectDescription.value = '';
@@ -3882,6 +3931,30 @@ function removeLabRecord(record: LabRecord) {
 
   refreshLabData();
   refreshTodos();
+}
+
+function toggleLabRecordPinned(record: LabRecord) {
+  const shouldPin = !isPinned(record.pinnedAt);
+
+  if (
+    shouldPin &&
+    activeLabPinnedCount.value >= MAX_PINNED_LAB_RECORDS_PER_PROJECT
+  ) {
+    window.alert(
+      `每个做记项目最多置顶 ${MAX_PINNED_LAB_RECORDS_PER_PROJECT} 条记录，请先取消其他置顶。`,
+    );
+    return;
+  }
+
+  const updatedRecord = setLabRecordPinned(record.id, shouldPin);
+
+  if (!updatedRecord) {
+    window.alert(shouldPin ? '记录置顶失败，请稍后再试。' : '取消置顶失败，请稍后再试。');
+    return;
+  }
+
+  selectedLabRecordId.value = updatedRecord.id;
+  refreshLabData();
 }
 
 function refreshAgentConversations() {
@@ -5736,6 +5809,8 @@ onBeforeUnmount(() => {
                 {{ describeBranchFilter(activeKnowledgeBranchFilterId, activeKnowledgeBaseBranches) }}
                 ·
                 {{ activeKnowledgeNotes.length }} 条
+                ·
+                已置顶 {{ activeKnowledgePinnedCount }}/{{ MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE }}
               </small>
             </div>
             <div v-if="activeKnowledgeBase" class="knowledge-pane-actions">
@@ -5895,13 +5970,19 @@ onBeforeUnmount(() => {
                 :key="note.id"
                 type="button"
                 class="knowledge-note-list-item"
-                :class="{ active: selectedKnowledgeNoteId === note.id }"
+                :class="{
+                  active: selectedKnowledgeNoteId === note.id,
+                  'is-pinned': isPinned(note.pinnedAt),
+                }"
                 @click="selectKnowledgeNote(note)"
               >
                 <span class="entry-time">
                   {{ getDateGroupLabel(note.updatedAt) }} · {{ formatEntryTime(note.updatedAt) }}
                 </span>
-                <strong>{{ note.title }}</strong>
+                <div class="list-title-row">
+                  <strong>{{ note.title }}</strong>
+                  <span v-if="isPinned(note.pinnedAt)" class="pin-pill">置顶</span>
+                </div>
                 <p>{{ note.content }}</p>
                 <small>
                   {{ note.branchId ? getBranchPathLabel(activeKnowledgeBaseBranches, note.branchId) : '未分组' }}
@@ -6075,6 +6156,7 @@ onBeforeUnmount(() => {
               <span>
                 {{ selectedKnowledgeNote.branchId ? getBranchPathLabel(activeKnowledgeBaseBranches, selectedKnowledgeNote.branchId) : '未分组' }}
               </span>
+              <span v-if="isPinned(selectedKnowledgeNote.pinnedAt)" class="pin-meta-label">已置顶</span>
               <span v-if="selectedKnowledgeNote.sourceUrl">带来源链接</span>
             </div>
 
@@ -6107,6 +6189,9 @@ onBeforeUnmount(() => {
                 删除
               </button>
               <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="toggleKnowledgeNotePinned(selectedKnowledgeNote)">
+                  {{ isPinned(selectedKnowledgeNote.pinnedAt) ? '取消置顶' : '置顶' }}
+                </button>
                 <button class="ghost-action" type="button" @click="openKnowledgeReminderComposer(selectedKnowledgeNote)">
                   提醒
                 </button>
@@ -6308,6 +6393,8 @@ onBeforeUnmount(() => {
                 {{ describeBranchFilter(activeLabBranchFilterId, activeLabProjectBranches) }}
                 ·
                 {{ activeLabRecords.length }} 条
+                ·
+                已置顶 {{ activeLabPinnedCount }}/{{ MAX_PINNED_LAB_RECORDS_PER_PROJECT }}
               </small>
             </div>
             <div v-if="activeLabProject" class="knowledge-pane-actions">
@@ -6470,6 +6557,7 @@ onBeforeUnmount(() => {
                 :class="[
                   { active: selectedLabRecordId === record.id },
                   { 'has-card-todo': Boolean(getCardTodo('project', record.id)) },
+                  { 'is-pinned': isPinned(record.pinnedAt) },
                   `is-${record.type}`,
                 ]"
                 :data-todo-source="`project:${record.id}`"
@@ -6480,6 +6568,7 @@ onBeforeUnmount(() => {
                     {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
                   </span>
                   <div class="lab-record-list-badges">
+                    <span v-if="isPinned(record.pinnedAt)" class="pin-pill">置顶</span>
                     <span
                       v-if="getCardTodo('project', record.id)"
                       class="todo-mini-badge"
@@ -6523,20 +6612,26 @@ onBeforeUnmount(() => {
                   :key="item.todo.id"
                   type="button"
                   class="lab-record-list-item is-todo-done"
-                  :class="`is-${item.record.type}`"
+                  :class="[
+                    `is-${item.record.type}`,
+                    { 'is-pinned': isPinned(item.record.pinnedAt) },
+                  ]"
                   :data-todo-source="`project:${item.record.id}`"
                   :data-todo-target="item.todo.id"
                   @click="selectLabRecord(item.record)"
                 >
                   <div class="lab-record-list-header">
                     <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
-                    <button
-                      class="todo-card-toggle is-done"
-                      type="button"
-                      @click.stop="toggleTodoStatus(item.todo)"
-                    >
-                      {{ getTodoStatusIcon(item.todo) }}
-                    </button>
+                    <div class="lab-record-list-badges">
+                      <span v-if="isPinned(item.record.pinnedAt)" class="pin-pill">置顶</span>
+                      <button
+                        class="todo-card-toggle is-done"
+                        type="button"
+                        @click.stop="toggleTodoStatus(item.todo)"
+                      >
+                        {{ getTodoStatusIcon(item.todo) }}
+                      </button>
+                    </div>
                   </div>
                   <strong>{{ item.record.title }}</strong>
                   <p>{{ item.record.content }}</p>
@@ -6734,6 +6829,7 @@ onBeforeUnmount(() => {
               <span>
                 {{ selectedLabRecord.branchId ? getBranchPathLabel(activeLabProjectBranches, selectedLabRecord.branchId) : '未分组' }}
               </span>
+              <span v-if="isPinned(selectedLabRecord.pinnedAt)" class="pin-meta-label">已置顶</span>
               <span class="record-type-pill" :class="`is-${selectedLabRecord.type}`">
                 {{ getLabRecordTypeLabel(selectedLabRecord.type) }}
               </span>
@@ -6804,6 +6900,9 @@ onBeforeUnmount(() => {
                 删除
               </button>
               <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="toggleLabRecordPinned(selectedLabRecord)">
+                  {{ isPinned(selectedLabRecord.pinnedAt) ? '取消置顶' : '置顶' }}
+                </button>
                 <button
                   class="ghost-action"
                   type="button"

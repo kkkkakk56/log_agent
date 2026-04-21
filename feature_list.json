@@ -353,7 +353,7 @@
       "featureId": "F008",
       "category": "feature",
       "description": "搜索体验优化：高亮关键词、清空查询、显示命中片段",
-      "status": "planned",
+      "status": "done",
       "priority": 11,
       "dependsOn": [
         "F003"
@@ -364,9 +364,32 @@
         "长日志显示围绕命中位置的摘要片段",
         "至少 1000 条本地日志下搜索仍保持流畅"
       ],
-      "passes": false,
+      "passes": true,
       "verify_cmd": "cd journal-agent && npm run build",
-      "notes": "先不要引入重型搜索库。"
+      "notes": "已完成。搜索结果支持多关键词高亮、清空查询、正文命中摘要片段和标签命中展示；实现保持轻量，不引入重型搜索库。验证通过：npm run build。"
+    },
+    {
+      "id": "TASK-036",
+      "featureId": "F038",
+      "category": "feature",
+      "description": "记录重要性标记：任意记录都可以用小巧的 ✦ 符号标记为重要，便于快速识别",
+      "status": "planned",
+      "priority": 11,
+      "dependsOn": [
+        "F021",
+        "F022",
+        "F024"
+      ],
+      "steps": [
+        "为当前支持的记录类型增加独立的重要标记字段，默认未标记",
+        "心记、知识笔记和做记记录都提供一键标记或取消重要的入口",
+        "被标记的记录在列表和详情里用统一的小符号 ✦ 展示",
+        "重要标记不写入正文内容，只作为独立元数据保存",
+        "重启 App 后仍然保留重要标记状态"
+      ],
+      "passes": false,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "第一版采用二元重要标记，不做多级优先级；符号先统一使用小巧且有辨识度的 ✦。"
     },
     {
       "id": "TASK-017",
@@ -740,6 +763,28 @@
       "passes": true,
       "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
       "notes": "已完成。当前版本按用户允许的降级方案，先使用自定义解锁密码替代 Face ID；密库内容通过 PBKDF2 派生密钥后使用 AES-GCM 在本地加密保存。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "TASK-037",
+      "featureId": "F039",
+      "category": "feature",
+      "description": "笔记与做记置顶：知识库笔记和做记记录支持置顶显示，并限制每个仓库或项目最多 5 条",
+      "status": "done",
+      "priority": 12,
+      "dependsOn": [
+        "F024",
+        "F026"
+      ],
+      "steps": [
+        "知识笔记和做记记录增加持久化的置顶状态，重启后仍保留",
+        "列表中把已置顶内容排在普通内容前面，并显示清晰的置顶标记",
+        "详情页支持一键置顶和取消置顶",
+        "每个知识库最多置顶 5 条笔记，每个做记项目最多置顶 5 条记录",
+        "达到上限时提供明确提示，不允许继续置顶"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build && npx cap sync ios",
+      "notes": "已完成。知识库和做记记录现在使用 pinnedAt 持久化置顶状态；列表会优先展示置顶项，详情页可切换置顶；每个知识库 / 项目上限为 5。验证通过：npm run build，npx cap sync ios。"
     },
     {
       "id": "TASK-021",
@@ -1168,7 +1213,7 @@
     {
       "id": "F008",
       "title": "搜索体验优化",
-      "status": "planned",
+      "status": "done",
       "priority": 11,
       "phase": "M3-organization",
       "summary": "增加搜索命中高亮、清空按钮和结果摘要片段。",
@@ -1184,7 +1229,32 @@
       "verification": [
         "npm run build"
       ],
-      "notes": "在数据规模明显变大前，避免引入重型搜索依赖。"
+      "notes": "已完成。当前支持多关键词高亮、清空按钮、正文命中摘要片段和标签命中展示；暂未引入额外搜索库，先保持轻量实现。"
+    },
+    {
+      "id": "F038",
+      "title": "记录重要性标记",
+      "status": "planned",
+      "priority": 11,
+      "phase": "M3-record-hub",
+      "summary": "允许用户给任意记录加一个小巧但有辨识度的 ✦ 标记，用来快速标出重要内容。",
+      "dependsOn": [
+        "F021",
+        "F022",
+        "F024"
+      ],
+      "acceptanceCriteria": [
+        "当前支持的心记、知识笔记和做记记录都支持标记或取消重要。",
+        "重要记录会在列表和详情里展示统一的小符号 ✦。",
+        "重要标记不会改写原始标题和正文，只作为独立元数据保存。",
+        "关闭并重新打开 App 后，重要标记状态仍然保留。",
+        "第一版先做二元重要标记，不扩展为多级优先级。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "这个能力适合用来突出值得回看、复盘或优先处理的记录；第一版先不强绑筛选或排序，只把标记能力和展示打稳。"
     },
     {
       "id": "F021",
@@ -1548,6 +1618,31 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。当前版本按用户允许的降级方案，先使用自定义解锁密码替代 Face ID；密库内容通过 PBKDF2 派生密钥后使用 AES-GCM 在本地加密保存，复制功能优先使用 Clipboard API。验证通过：npm run build，npx cap sync ios。"
+    },
+    {
+      "id": "F039",
+      "title": "笔记与做记置顶",
+      "status": "done",
+      "priority": 12,
+      "phase": "M3-record-hub",
+      "summary": "知识库笔记和做记记录支持置顶显示，把重点内容固定在列表上方，并限制每个仓库或项目最多保留 5 条置顶。",
+      "dependsOn": [
+        "F024",
+        "F026"
+      ],
+      "acceptanceCriteria": [
+        "知识库里的笔记支持置顶和取消置顶，并在笔记列表中优先显示。",
+        "做记项目里的记录支持置顶和取消置顶，并在记录列表中优先显示。",
+        "置顶状态会持久化保存，刷新或重启 App 后不会丢失。",
+        "已置顶的笔记或记录有明确的视觉标记，便于一眼识别。",
+        "每个知识库最多置顶 5 条笔记，每个做记项目最多置顶 5 条记录。",
+        "达到置顶上限后，继续置顶会给出清晰提示。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。当前使用 pinnedAt 保存置顶时间，列表默认按置顶优先、随后按更新时间排序；详情页提供置顶开关，并在标题区域展示当前已置顶数量。"
     },
     {
       "id": "F025",
