@@ -69,6 +69,7 @@ import {
   createEntry,
   deleteEntry,
   getEntries,
+  setEntryFlagged,
   updateEntry,
 } from './storage/journalStore';
 import {
@@ -88,6 +89,7 @@ import {
   deleteKnowledgeNote,
   getKnowledgeBases,
   getKnowledgeNotes,
+  setKnowledgeNoteFlagged,
   setKnowledgeNotePinned,
   updateKnowledgeBase,
   updateKnowledgeNote,
@@ -101,6 +103,7 @@ import {
   deleteLabRecord,
   getLabProjects,
   getLabRecords,
+  setLabRecordFlagged,
   setLabRecordPinned,
   updateLabProject,
   updateLabRecord,
@@ -2719,6 +2722,10 @@ function isPinned(pinnedAt: string | null | undefined): boolean {
   return Boolean(pinnedAt);
 }
 
+function isFlagged(flaggedAt: string | null | undefined): boolean {
+  return Boolean(flaggedAt);
+}
+
 function refreshRecordBranches() {
   recordBranches.value = getRecordBranches({ includeArchived: true });
 }
@@ -3436,6 +3443,19 @@ function toggleKnowledgeNotePinned(note: KnowledgeNote) {
   refreshKnowledgeData();
 }
 
+function toggleKnowledgeNoteFlag(note: KnowledgeNote) {
+  const shouldFlag = !isFlagged(note.flaggedAt);
+  const updatedNote = setKnowledgeNoteFlagged(note.id, shouldFlag);
+
+  if (!updatedNote) {
+    window.alert(shouldFlag ? '笔记 Flag 失败，请稍后再试。' : '取消笔记 Flag 失败，请稍后再试。');
+    return;
+  }
+
+  selectedKnowledgeNoteId.value = updatedNote.id;
+  refreshKnowledgeData();
+}
+
 function resetNewLabProjectForm() {
   newLabProjectName.value = '';
   newLabProjectDescription.value = '';
@@ -3957,6 +3977,19 @@ function toggleLabRecordPinned(record: LabRecord) {
   refreshLabData();
 }
 
+function toggleLabRecordFlag(record: LabRecord) {
+  const shouldFlag = !isFlagged(record.flaggedAt);
+  const updatedRecord = setLabRecordFlagged(record.id, shouldFlag);
+
+  if (!updatedRecord) {
+    window.alert(shouldFlag ? '记录 Flag 失败，请稍后再试。' : '取消记录 Flag 失败，请稍后再试。');
+    return;
+  }
+
+  selectedLabRecordId.value = updatedRecord.id;
+  refreshLabData();
+}
+
 function refreshAgentConversations() {
   agentConversations.value = getAgentConversations();
 
@@ -4079,6 +4112,18 @@ function removeEntry(entry: JournalEntry) {
 
   refreshEntries();
   refreshTodos();
+}
+
+function toggleJournalEntryFlag(entry: JournalEntry) {
+  const shouldFlag = !isFlagged(entry.flaggedAt);
+  const updatedEntry = setEntryFlagged(entry.id, shouldFlag);
+
+  if (!updatedEntry) {
+    window.alert(shouldFlag ? 'Flag 失败，请稍后再试。' : '取消 Flag 失败，请稍后再试。');
+    return;
+  }
+
+  refreshEntries();
 }
 
 function getEntryCountForDate(dateKey: string): number {
@@ -4652,6 +4697,7 @@ onBeforeUnmount(() => {
           :data-todo-source="`journal:${result.entry.id}`"
           :class="{
             'is-expanded': isJournalEntryExpanded(result.entry.id),
+            'is-flagged': isFlagged(result.entry.flaggedAt),
             'is-reminder-target': isReminderHighlighted('journal-entry', result.entry.id),
             'is-todo-highlighted': isCardTodoHighlighted('journal', result.entry.id),
           }"
@@ -4705,7 +4751,12 @@ onBeforeUnmount(() => {
               <span class="entry-time">
                 {{ getJournalEntryDateLabel(result.entry) }} · 创建 {{ formatEntryTime(result.entry.createdAt) }}
               </span>
-              <strong v-html="result.titleHtml"></strong>
+              <div class="entry-title-row">
+                <strong v-html="result.titleHtml"></strong>
+                <div v-if="isFlagged(result.entry.flaggedAt)" class="entry-title-badges">
+                  <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                </div>
+              </div>
               <p
                 v-if="result.previewHtml || result.fullContentHtml"
                 class="search-result-preview"
@@ -4775,6 +4826,13 @@ onBeforeUnmount(() => {
                   @click="createJournalTodo(result.entry)"
                 >
                   待办
+                </button>
+                <button
+                  class="ghost-action reminder-action"
+                  type="button"
+                  @click="toggleJournalEntryFlag(result.entry)"
+                >
+                  {{ isFlagged(result.entry.flaggedAt) ? '取消 Flag' : 'Flag' }}
                 </button>
                 <button
                   class="ghost-action reminder-action"
@@ -4873,6 +4931,7 @@ onBeforeUnmount(() => {
           :data-todo-source="`journal:${entry.id}`"
           :class="{
             'is-expanded': isJournalEntryExpanded(entry.id),
+            'is-flagged': isFlagged(entry.flaggedAt),
             'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
             'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
           }"
@@ -4924,7 +4983,12 @@ onBeforeUnmount(() => {
                 @click="toggleJournalEntryExpanded(entry.id)"
               >
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
-                <strong>{{ entry.title }}</strong>
+                <div class="entry-title-row">
+                  <strong>{{ entry.title }}</strong>
+                  <div v-if="isFlagged(entry.flaggedAt)" class="entry-title-badges">
+                    <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                  </div>
+                </div>
                 <p
                   @click.stop="handleJournalEntryContentClick(entry.id, $event)"
                   v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
@@ -4965,6 +5029,13 @@ onBeforeUnmount(() => {
                   >
                     待办
                   </button>
+                  <button
+                    class="ghost-action reminder-action"
+                    type="button"
+                    @click="toggleJournalEntryFlag(entry)"
+                  >
+                    {{ isFlagged(entry.flaggedAt) ? '取消 Flag' : 'Flag' }}
+                  </button>
                   <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
                     编辑
                   </button>
@@ -5001,7 +5072,10 @@ onBeforeUnmount(() => {
             class="entry-card is-todo-done"
             :data-todo-source="`journal:${item.entry.id}`"
             :data-todo-target="item.todo.id"
-            :class="{ 'is-expanded': isJournalEntryExpanded(item.entry.id) }"
+            :class="{
+              'is-expanded': isJournalEntryExpanded(item.entry.id),
+              'is-flagged': isFlagged(item.entry.flaggedAt),
+            }"
           >
               <div class="todo-card-strip is-done">
                 <button
@@ -5018,8 +5092,13 @@ onBeforeUnmount(() => {
                 class="entry-body selectable-entry-body"
                 @click="toggleJournalEntryExpanded(item.entry.id)"
               >
-                <span class="entry-time">创建 {{ formatEntryTime(item.entry.createdAt) }}</span>
+              <span class="entry-time">创建 {{ formatEntryTime(item.entry.createdAt) }}</span>
+              <div class="entry-title-row">
                 <strong>{{ item.entry.title }}</strong>
+                <div v-if="isFlagged(item.entry.flaggedAt)" class="entry-title-badges">
+                  <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                </div>
+              </div>
                 <p
                   @click.stop="handleJournalEntryContentClick(item.entry.id, $event)"
                   v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
@@ -5059,6 +5138,7 @@ onBeforeUnmount(() => {
             :data-todo-source="`journal:${entry.id}`"
             :class="{
               'is-expanded': isJournalEntryExpanded(entry.id),
+              'is-flagged': isFlagged(entry.flaggedAt),
               'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
               'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
             }"
@@ -5110,7 +5190,12 @@ onBeforeUnmount(() => {
                 @click="toggleJournalEntryExpanded(entry.id)"
               >
                 <span class="entry-time">创建 {{ formatEntryTime(entry.createdAt) }}</span>
-                <strong>{{ entry.title }}</strong>
+                <div class="entry-title-row">
+                  <strong>{{ entry.title }}</strong>
+                  <div v-if="isFlagged(entry.flaggedAt)" class="entry-title-badges">
+                    <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                  </div>
+                </div>
                 <p
                   @click.stop="handleJournalEntryContentClick(entry.id, $event)"
                   v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
@@ -5151,6 +5236,13 @@ onBeforeUnmount(() => {
                   >
                     待办
                   </button>
+                  <button
+                    class="ghost-action reminder-action"
+                    type="button"
+                    @click="toggleJournalEntryFlag(entry)"
+                  >
+                    {{ isFlagged(entry.flaggedAt) ? '取消 Flag' : 'Flag' }}
+                  </button>
                   <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
                     编辑
                   </button>
@@ -5188,7 +5280,10 @@ onBeforeUnmount(() => {
             class="entry-card is-todo-done"
             :data-todo-source="`journal:${item.entry.id}`"
             :data-todo-target="item.todo.id"
-            :class="{ 'is-expanded': isJournalEntryExpanded(item.entry.id) }"
+            :class="{
+              'is-expanded': isJournalEntryExpanded(item.entry.id),
+              'is-flagged': isFlagged(item.entry.flaggedAt),
+            }"
           >
             <div class="todo-card-strip is-done">
               <button
@@ -5208,7 +5303,12 @@ onBeforeUnmount(() => {
               <span class="entry-time">
                 {{ getJournalEntryDateLabel(item.entry) }} · 创建 {{ formatEntryTime(item.entry.createdAt) }}
               </span>
-              <strong>{{ item.entry.title }}</strong>
+              <div class="entry-title-row">
+                <strong>{{ item.entry.title }}</strong>
+                <div v-if="isFlagged(item.entry.flaggedAt)" class="entry-title-badges">
+                  <span class="flag-pill" aria-label="已标记重要">⚑</span>
+                </div>
+              </div>
               <p
                 @click.stop="handleJournalEntryContentClick(item.entry.id, $event)"
                 v-html="renderTodoContent(item.entry.content, 'journal', item.entry.id, 'journal-entry')"
@@ -5972,6 +6072,7 @@ onBeforeUnmount(() => {
                 class="knowledge-note-list-item"
                 :class="{
                   active: selectedKnowledgeNoteId === note.id,
+                  'is-flagged': isFlagged(note.flaggedAt),
                   'is-pinned': isPinned(note.pinnedAt),
                 }"
                 @click="selectKnowledgeNote(note)"
@@ -5981,7 +6082,10 @@ onBeforeUnmount(() => {
                 </span>
                 <div class="list-title-row">
                   <strong>{{ note.title }}</strong>
-                  <span v-if="isPinned(note.pinnedAt)" class="pin-pill">置顶</span>
+                  <div class="list-title-badges">
+                    <span v-if="isFlagged(note.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
+                    <span v-if="isPinned(note.pinnedAt)" class="pin-pill">置顶</span>
+                  </div>
                 </div>
                 <p>{{ note.content }}</p>
                 <small>
@@ -6156,6 +6260,7 @@ onBeforeUnmount(() => {
               <span>
                 {{ selectedKnowledgeNote.branchId ? getBranchPathLabel(activeKnowledgeBaseBranches, selectedKnowledgeNote.branchId) : '未分组' }}
               </span>
+              <span v-if="isFlagged(selectedKnowledgeNote.flaggedAt)" class="flag-meta-label">⚑ Flag</span>
               <span v-if="isPinned(selectedKnowledgeNote.pinnedAt)" class="pin-meta-label">已置顶</span>
               <span v-if="selectedKnowledgeNote.sourceUrl">带来源链接</span>
             </div>
@@ -6189,6 +6294,9 @@ onBeforeUnmount(() => {
                 删除
               </button>
               <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="toggleKnowledgeNoteFlag(selectedKnowledgeNote)">
+                  {{ isFlagged(selectedKnowledgeNote.flaggedAt) ? '取消 Flag' : 'Flag' }}
+                </button>
                 <button class="ghost-action" type="button" @click="toggleKnowledgeNotePinned(selectedKnowledgeNote)">
                   {{ isPinned(selectedKnowledgeNote.pinnedAt) ? '取消置顶' : '置顶' }}
                 </button>
@@ -6556,6 +6664,7 @@ onBeforeUnmount(() => {
                 class="lab-record-list-item"
                 :class="[
                   { active: selectedLabRecordId === record.id },
+                  { 'is-flagged': isFlagged(record.flaggedAt) },
                   { 'has-card-todo': Boolean(getCardTodo('project', record.id)) },
                   { 'is-pinned': isPinned(record.pinnedAt) },
                   `is-${record.type}`,
@@ -6568,6 +6677,7 @@ onBeforeUnmount(() => {
                     {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
                   </span>
                   <div class="lab-record-list-badges">
+                    <span v-if="isFlagged(record.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
                     <span v-if="isPinned(record.pinnedAt)" class="pin-pill">置顶</span>
                     <span
                       v-if="getCardTodo('project', record.id)"
@@ -6614,6 +6724,7 @@ onBeforeUnmount(() => {
                   class="lab-record-list-item is-todo-done"
                   :class="[
                     `is-${item.record.type}`,
+                    { 'is-flagged': isFlagged(item.record.flaggedAt) },
                     { 'is-pinned': isPinned(item.record.pinnedAt) },
                   ]"
                   :data-todo-source="`project:${item.record.id}`"
@@ -6623,6 +6734,7 @@ onBeforeUnmount(() => {
                   <div class="lab-record-list-header">
                     <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
                     <div class="lab-record-list-badges">
+                      <span v-if="isFlagged(item.record.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
                       <span v-if="isPinned(item.record.pinnedAt)" class="pin-pill">置顶</span>
                       <button
                         class="todo-card-toggle is-done"
@@ -6829,6 +6941,7 @@ onBeforeUnmount(() => {
               <span>
                 {{ selectedLabRecord.branchId ? getBranchPathLabel(activeLabProjectBranches, selectedLabRecord.branchId) : '未分组' }}
               </span>
+              <span v-if="isFlagged(selectedLabRecord.flaggedAt)" class="flag-meta-label">⚑ Flag</span>
               <span v-if="isPinned(selectedLabRecord.pinnedAt)" class="pin-meta-label">已置顶</span>
               <span class="record-type-pill" :class="`is-${selectedLabRecord.type}`">
                 {{ getLabRecordTypeLabel(selectedLabRecord.type) }}
@@ -6900,6 +7013,9 @@ onBeforeUnmount(() => {
                 删除
               </button>
               <div class="knowledge-inline-actions">
+                <button class="ghost-action" type="button" @click="toggleLabRecordFlag(selectedLabRecord)">
+                  {{ isFlagged(selectedLabRecord.flaggedAt) ? '取消 Flag' : 'Flag' }}
+                </button>
                 <button class="ghost-action" type="button" @click="toggleLabRecordPinned(selectedLabRecord)">
                   {{ isPinned(selectedLabRecord.pinnedAt) ? '取消置顶' : '置顶' }}
                 </button>

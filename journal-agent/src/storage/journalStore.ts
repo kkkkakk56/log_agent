@@ -48,6 +48,9 @@ const normalizeJournalEntry = (value: unknown): JournalEntry | null => {
     typeof value.id !== 'string' ||
     typeof value.title !== 'string' ||
     typeof value.content !== 'string' ||
+    (typeof value.flaggedAt !== 'string' &&
+      value.flaggedAt !== null &&
+      value.flaggedAt !== undefined) ||
     typeof value.createdAt !== 'string' ||
     typeof value.updatedAt !== 'string' ||
     (typeof value.deletedAt !== 'string' && value.deletedAt !== null) ||
@@ -61,6 +64,7 @@ const normalizeJournalEntry = (value: unknown): JournalEntry | null => {
     id: value.id,
     title: value.title,
     content: value.content,
+    flaggedAt: typeof value.flaggedAt === 'string' ? value.flaggedAt : null,
     entryDate: isDateKey(value.entryDate)
       ? value.entryDate
       : createEntryDateFromIso(value.createdAt),
@@ -155,6 +159,7 @@ export const createEntry = (
     id: createId(),
     title: createTitle(normalizedContent, title),
     content: normalizedContent,
+    flaggedAt: null,
     entryDate,
     createdAt: now,
     updatedAt: now,
@@ -236,6 +241,30 @@ export const deleteEntry = (id: string): void => {
   nextEntries[entryIndex] = deletedEntry;
 
   writeEntries(nextEntries);
+};
+
+export const setEntryFlagged = (
+  id: string,
+  flagged: boolean,
+): JournalEntry | null => {
+  const entries = readEntries();
+  const entryIndex = entries.findIndex(
+    (entry) => entry.id === id && entry.deletedAt === null,
+  );
+
+  if (entryIndex === -1) {
+    return null;
+  }
+
+  const currentEntry = entries[entryIndex];
+  const updatedEntry: JournalEntry = {
+    ...currentEntry,
+    flaggedAt: flagged ? currentEntry.flaggedAt ?? new Date().toISOString() : null,
+  };
+  const nextEntries = [...entries];
+  nextEntries[entryIndex] = updatedEntry;
+
+  return writeEntries(nextEntries) ? updatedEntry : null;
 };
 
 export const clearEntries = (): void => {

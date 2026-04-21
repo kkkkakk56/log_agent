@@ -111,6 +111,7 @@ const serializeEntry = (entry: JournalEntry, index: number): string => {
     `updatedAt: ${formatDateTime(entry.updatedAt)}`,
     `tags: ${tags}`,
     `mood: ${mood}`,
+    `flagged: ${entry.flaggedAt ? '是' : '否'}`,
     `content: ${truncateText(entry.content, MAX_CONTENT_LENGTH)}`,
   ].join('\n');
 };
