@@ -1,4 +1,5 @@
 import type { KnowledgeBase, KnowledgeNote } from '../types/knowledge';
+import { normalizeRecordImages } from '../utils/recordImages';
 import { deleteBranchesForContainer, getRecordBranches } from './branchStore';
 
 const BASES_STORAGE_KEY = 'journal-agent.knowledge.bases.v1';
@@ -68,6 +69,7 @@ const parseKnowledgeNote = (value: unknown): KnowledgeNote | null => {
     content: value.content,
     sourceUrl: value.sourceUrl,
     tags: value.tags,
+    images: normalizeRecordImages(value.images),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     deletedAt: value.deletedAt,
@@ -305,7 +307,7 @@ export const createKnowledgeNote = (
   baseId: string,
   fields: Pick<
     KnowledgeNote,
-    'title' | 'content' | 'sourceUrl' | 'tags' | 'branchId'
+    'title' | 'content' | 'sourceUrl' | 'tags' | 'branchId' | 'images'
   >,
 ): KnowledgeNote | null => {
   const activeBase = getKnowledgeBases().find((base) => base.id === baseId);
@@ -330,6 +332,7 @@ export const createKnowledgeNote = (
     content: normalizedContent,
     sourceUrl: fields.sourceUrl.trim(),
     tags: normalizeTags(fields.tags),
+    images: normalizeRecordImages(fields.images),
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -348,7 +351,7 @@ export const updateKnowledgeNote = (
   id: string,
   fields: Pick<
     KnowledgeNote,
-    'title' | 'content' | 'sourceUrl' | 'tags' | 'branchId'
+    'title' | 'content' | 'sourceUrl' | 'tags' | 'branchId' | 'images'
   >,
 ): KnowledgeNote | null => {
   const normalizedContent = fields.content.trim();
@@ -380,6 +383,7 @@ export const updateKnowledgeNote = (
     content: normalizedContent,
     sourceUrl: fields.sourceUrl.trim(),
     tags: normalizeTags(fields.tags),
+    images: normalizeRecordImages(fields.images),
     updatedAt: new Date().toISOString(),
   };
   const nextNotes = [...notes];

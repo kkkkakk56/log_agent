@@ -1,3 +1,5 @@
+import type { RecordImageAttachment } from './media';
+
 export type JournalMood = 'great' | 'calm' | 'tired' | 'low';
 
 export type JournalSyncStatus = 'local' | 'pending' | 'synced';
@@ -12,6 +14,7 @@ export interface JournalEntry {
   updatedAt: string;
   deletedAt: string | null;
   tags: string[];
+  images: RecordImageAttachment[];
   syncStatus: JournalSyncStatus;
   mood?: JournalMood | null;
 }

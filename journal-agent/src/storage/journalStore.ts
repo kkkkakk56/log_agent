@@ -1,4 +1,6 @@
 import type { JournalEntry, JournalMood, JournalSyncStatus } from '../types/journal';
+import type { RecordImageAttachment } from '../types/media';
+import { normalizeRecordImages } from '../utils/recordImages';
 
 const STORAGE_KEY = 'journal-agent.entries.v1';
 const MAX_TITLE_LENGTH = 18;
@@ -72,6 +74,7 @@ const normalizeJournalEntry = (value: unknown): JournalEntry | null => {
     updatedAt: value.updatedAt,
     deletedAt: value.deletedAt,
     tags: value.tags,
+    images: normalizeRecordImages(value.images),
     syncStatus: value.syncStatus,
     mood: isJournalMood(value.mood) ? value.mood : null,
   };
@@ -147,6 +150,7 @@ export const createEntry = (
   content: string,
   title = '',
   entryDate = getLocalDateKey(new Date()),
+  images: RecordImageAttachment[] = [],
 ): JournalEntry | null => {
   const normalizedContent = content.trim();
 
@@ -165,6 +169,7 @@ export const createEntry = (
     updatedAt: now,
     deletedAt: null,
     tags: [],
+    images: normalizeRecordImages(images),
     syncStatus: 'local',
   };
   const entries = [...readEntries(), entry];
@@ -174,7 +179,14 @@ export const createEntry = (
 
 export const updateEntry = (
   id: string,
-  fieldsOrContent: string | { title?: string; content: string; entryDate?: string },
+  fieldsOrContent:
+    | string
+    | {
+        title?: string;
+        content: string;
+        entryDate?: string;
+        images?: RecordImageAttachment[];
+      },
 ): JournalEntry | null => {
   const normalizedContent =
     typeof fieldsOrContent === 'string'
@@ -212,6 +224,10 @@ export const updateEntry = (
         : fieldsOrContent.title === undefined
           ? entries[entryIndex].title
           : createTitle(normalizedContent, fieldsOrContent.title),
+    images:
+      typeof fieldsOrContent === 'string' || fieldsOrContent.images === undefined
+        ? entries[entryIndex].images
+        : normalizeRecordImages(fieldsOrContent.images),
     updatedAt: new Date().toISOString(),
   };
   const nextEntries = [...entries];
