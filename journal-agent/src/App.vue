@@ -563,6 +563,17 @@ const selectedKnowledgeNote = computed(
       (note) => note.id === selectedKnowledgeNoteId.value,
     ) ?? null,
 );
+const showKnowledgeInspector = computed(() => {
+  if (!activeKnowledgeBase.value) {
+    return true;
+  }
+
+  return (
+    knowledgeInspectorMode.value === 'base' ||
+    knowledgeInspectorMode.value === 'base-edit' ||
+    knowledgeInspectorMode.value === 'note-create'
+  );
+});
 
 const knowledgeBranchSelectOptions = computed(() =>
   buildBranchSelectOptions(
@@ -669,6 +680,17 @@ const selectedLabRecord = computed(
     ) ??
     null,
 );
+const showLabInspector = computed(() => {
+  if (!activeLabProject.value) {
+    return true;
+  }
+
+  return (
+    labInspectorMode.value === 'project' ||
+    labInspectorMode.value === 'project-edit' ||
+    labInspectorMode.value === 'record-create'
+  );
+});
 
 const resolvedCardActionMenuTarget = computed<ResolvedCardActionMenuTarget | null>(() => {
   const activeTarget = cardActionMenuTarget.value;
@@ -3734,6 +3756,34 @@ function selectKnowledgeNote(note: KnowledgeNote) {
   cancelKnowledgeNoteEditing();
 }
 
+function isKnowledgeNoteExpanded(noteId: string): boolean {
+  return (
+    selectedKnowledgeNoteId.value === noteId &&
+    (knowledgeInspectorMode.value === 'note-view' ||
+      knowledgeInspectorMode.value === 'note-edit')
+  );
+}
+
+function isKnowledgeNoteEditing(noteId: string): boolean {
+  return (
+    editingKnowledgeNoteId.value === noteId &&
+    knowledgeInspectorMode.value === 'note-edit'
+  );
+}
+
+function toggleKnowledgeNoteExpanded(note: KnowledgeNote) {
+  if (hasActiveTextSelection() || isKnowledgeNoteEditing(note.id)) {
+    return;
+  }
+
+  if (isKnowledgeNoteExpanded(note.id)) {
+    showKnowledgeBaseSummary();
+    return;
+  }
+
+  selectKnowledgeNote(note);
+}
+
 function startKnowledgeNoteEditing(note: KnowledgeNote) {
   ensureKnowledgeBranchFilterForNote(note);
   selectedKnowledgeNoteId.value = note.id;
@@ -4264,6 +4314,49 @@ function selectLabRecord(record: LabRecord) {
   labInspectorMode.value = 'record-view';
   resetNewLabRecordForm();
   cancelLabRecordEditing();
+}
+
+function isLabRecordExpanded(recordId: string): boolean {
+  return (
+    selectedLabRecordId.value === recordId &&
+    (labInspectorMode.value === 'record-view' ||
+      labInspectorMode.value === 'record-edit')
+  );
+}
+
+function isLabRecordEditing(recordId: string): boolean {
+  return (
+    editingLabRecordId.value === recordId &&
+    labInspectorMode.value === 'record-edit'
+  );
+}
+
+function toggleLabRecordExpanded(record: LabRecord) {
+  if (hasActiveTextSelection() || isLabRecordEditing(record.id)) {
+    return;
+  }
+
+  if (isLabRecordExpanded(record.id)) {
+    showLabProjectSummary();
+    return;
+  }
+
+  selectLabRecord(record);
+}
+
+function handleLabRecordContentClick(record: LabRecord, event: MouseEvent) {
+  const target = event.target;
+
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.closest('[data-todo-expand], [data-todo-id]')) {
+    handleTodoContentClick(event);
+    return;
+  }
+
+  toggleLabRecordExpanded(record);
 }
 
 function startLabRecordEditing(record: LabRecord) {
@@ -6364,7 +6457,11 @@ onBeforeUnmount(() => {
         </form>
       </aside>
 
-      <section class="knowledge-shell" aria-label="知识笔记工作台">
+      <section
+        class="knowledge-shell"
+        :class="{ 'has-inspector': showKnowledgeInspector }"
+        aria-label="知识笔记工作台"
+      >
         <section class="knowledge-notes-pane" aria-labelledby="knowledge-notes-title">
           <div class="section-heading compact knowledge-pane-heading knowledge-pane-toolbar">
             <div>
@@ -6536,44 +6633,141 @@ onBeforeUnmount(() => {
                 :key="note.id"
                 class="knowledge-note-list-item"
                 :class="{
-                  active: selectedKnowledgeNoteId === note.id,
+                  active: isKnowledgeNoteExpanded(note.id),
+                  'is-expanded': isKnowledgeNoteExpanded(note.id),
                   'is-flagged': isFlagged(note.flaggedAt),
                   'is-pinned': isPinned(note.pinnedAt),
                 }"
-                role="button"
-                tabindex="0"
-                @click="selectKnowledgeNote(note)"
-                @keydown.enter.prevent="selectKnowledgeNote(note)"
-                @keydown.space.prevent="selectKnowledgeNote(note)"
               >
-                <span class="entry-time">
-                  {{ getDateGroupLabel(note.updatedAt) }} · {{ formatEntryTime(note.updatedAt) }}
-                </span>
-                <div class="list-title-row">
-                  <strong>{{ note.title }}</strong>
-                  <div class="entry-title-actions">
-                    <div class="list-title-badges">
-                      <span v-if="isFlagged(note.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
-                      <span v-if="isPinned(note.pinnedAt)" class="pin-pill">置顶</span>
+                <div
+                  class="knowledge-note-summary"
+                  role="button"
+                  :tabindex="isKnowledgeNoteEditing(note.id) ? -1 : 0"
+                  :aria-expanded="isKnowledgeNoteExpanded(note.id)"
+                  @click="toggleKnowledgeNoteExpanded(note)"
+                  @keydown.enter.prevent="toggleKnowledgeNoteExpanded(note)"
+                  @keydown.space.prevent="toggleKnowledgeNoteExpanded(note)"
+                >
+                  <span class="entry-time">
+                    {{ getDateGroupLabel(note.updatedAt) }} · {{ formatEntryTime(note.updatedAt) }}
+                  </span>
+                  <div class="list-title-row">
+                    <strong>{{ note.title }}</strong>
+                    <div class="entry-title-actions">
+                      <div class="list-title-badges">
+                        <span v-if="isFlagged(note.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
+                        <span v-if="isPinned(note.pinnedAt)" class="pin-pill">置顶</span>
+                      </div>
+                      <button
+                        class="card-menu-trigger"
+                        :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'knowledge', noteId: note.id }) }"
+                        type="button"
+                        aria-haspopup="menu"
+                        :aria-expanded="isCardActionMenuOpenFor({ kind: 'knowledge', noteId: note.id })"
+                        aria-label="打开这条知识笔记的操作菜单"
+                        @click.stop="toggleCardActionMenu({ kind: 'knowledge', noteId: note.id }, $event)"
+                      >
+                        ⋯
+                      </button>
                     </div>
-                    <button
-                      class="card-menu-trigger"
-                      :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'knowledge', noteId: note.id }) }"
-                      type="button"
-                      aria-haspopup="menu"
-                      :aria-expanded="isCardActionMenuOpenFor({ kind: 'knowledge', noteId: note.id })"
-                      aria-label="打开这条知识笔记的操作菜单"
-                      @click.stop="toggleCardActionMenu({ kind: 'knowledge', noteId: note.id }, $event)"
-                    >
-                      ⋯
-                    </button>
                   </div>
+                  <p
+                    v-if="isKnowledgeNoteExpanded(note.id)"
+                    class="knowledge-note-preview"
+                    :data-reminder-target="`knowledge-note:${note.id}`"
+                    :class="{ 'has-reminder-target': isReminderHighlighted('knowledge-note', note.id) }"
+                    v-html="renderReminderHighlightedContent(note.content, 'knowledge-note', note.id)"
+                  ></p>
+                  <p v-else class="knowledge-note-preview">{{ note.content }}</p>
                 </div>
-                <p>{{ note.content }}</p>
-                <small>
-                  {{ note.branchId ? getBranchPathLabel(activeKnowledgeBaseBranches, note.branchId) : '未分组' }}
-                </small>
-                <small v-if="note.tags.length > 0">{{ note.tags.join(' / ') }}</small>
+
+                <div
+                  v-if="isKnowledgeNoteExpanded(note.id)"
+                  class="record-inline-panel"
+                >
+                  <template v-if="isKnowledgeNoteEditing(note.id)">
+                    <p class="eyebrow">编辑笔记</p>
+
+                    <input
+                      v-model="editingKnowledgeNoteTitle"
+                      class="title-input"
+                      type="text"
+                      maxlength="80"
+                      aria-label="编辑知识记录标题"
+                    />
+                    <textarea
+                      v-model="editingKnowledgeNoteContent"
+                      class="journal-input edit-input"
+                      rows="10"
+                    />
+                    <label class="branch-field">
+                      <span>归属分支</span>
+                      <select v-model="editingKnowledgeNoteBranchValue" class="branch-select">
+                        <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+                        <option
+                          v-for="option in knowledgeBranchSelectOptions"
+                          :key="option.value"
+                          :value="option.value"
+                        >
+                          {{ option.label }}
+                        </option>
+                      </select>
+                    </label>
+                    <input
+                      v-model="editingKnowledgeNoteSourceUrl"
+                      class="search-input compact-input"
+                      type="url"
+                      placeholder="来源链接，可选"
+                      aria-label="编辑知识记录来源链接"
+                    />
+                    <input
+                      v-model="editingKnowledgeNoteTags"
+                      class="search-input compact-input"
+                      type="text"
+                      placeholder="标签，用逗号分隔"
+                      aria-label="编辑知识记录标签"
+                    />
+                    <div class="entry-actions">
+                      <button class="ghost-action" type="button" @click="selectKnowledgeNote(note)">
+                        取消
+                      </button>
+                      <button
+                        class="primary-action small"
+                        type="button"
+                        :disabled="!canSaveKnowledgeNote"
+                        @click="saveKnowledgeNoteEditing"
+                      >
+                        保存修改
+                      </button>
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <div
+                      v-if="note.branchId"
+                      class="record-inline-meta"
+                    >
+                      <span>{{ getBranchPathLabel(activeKnowledgeBaseBranches, note.branchId) }}</span>
+                    </div>
+
+                    <div
+                      v-if="note.tags.length > 0"
+                      class="tag-row knowledge-detail-tags"
+                    >
+                      <span v-for="tag in note.tags" :key="tag">{{ tag }}</span>
+                    </div>
+
+                    <a
+                      v-if="note.sourceUrl"
+                      class="source-link"
+                      :href="note.sourceUrl"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      打开来源
+                    </a>
+                  </template>
+                </div>
               </article>
             </div>
           </template>
@@ -6589,7 +6783,11 @@ onBeforeUnmount(() => {
           </button>
         </section>
 
-        <section class="knowledge-inspector" aria-labelledby="knowledge-inspector-title">
+        <section
+          v-if="showKnowledgeInspector"
+          class="knowledge-inspector"
+          aria-labelledby="knowledge-inspector-title"
+        >
           <template v-if="!activeKnowledgeBase">
             <div class="empty-state knowledge-empty-state">
               <p>这里会显示仓库或笔记详情。</p>
@@ -6972,7 +7170,11 @@ onBeforeUnmount(() => {
         </form>
       </aside>
 
-      <section class="lab-shell" aria-label="做记项目工作台">
+      <section
+        class="lab-shell"
+        :class="{ 'has-inspector': showLabInspector }"
+        aria-label="做记项目工作台"
+      >
         <section class="lab-records-pane" aria-labelledby="lab-records-title">
           <div class="section-heading compact knowledge-pane-heading knowledge-pane-toolbar">
             <div>
@@ -7144,54 +7346,198 @@ onBeforeUnmount(() => {
                 :key="record.id"
                 class="lab-record-list-item"
                 :class="[
-                  { active: selectedLabRecordId === record.id },
+                  { active: isLabRecordExpanded(record.id) },
+                  { 'is-expanded': isLabRecordExpanded(record.id) },
                   { 'is-flagged': isFlagged(record.flaggedAt) },
                   { 'has-card-todo': Boolean(getCardTodo('project', record.id)) },
                   { 'is-pinned': isPinned(record.pinnedAt) },
                   `is-${record.type}`,
                 ]"
                 :data-todo-source="`project:${record.id}`"
-                role="button"
-                tabindex="0"
-                @click="selectLabRecord(record)"
-                @keydown.enter.prevent="selectLabRecord(record)"
-                @keydown.space.prevent="selectLabRecord(record)"
               >
-                <div class="lab-record-list-header">
-                  <span class="entry-time">
-                    {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
-                  </span>
-                  <div class="lab-record-list-badges">
-                    <span v-if="isFlagged(record.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
-                    <span v-if="isPinned(record.pinnedAt)" class="pin-pill">置顶</span>
-                    <span
-                      v-if="getCardTodo('project', record.id)"
-                      class="todo-mini-badge"
-                    >
-                      {{ getCardTodoIcon('project', record.id) }}
+                <div
+                  class="lab-record-summary"
+                  role="button"
+                  :tabindex="isLabRecordEditing(record.id) ? -1 : 0"
+                  :aria-expanded="isLabRecordExpanded(record.id)"
+                  @click="toggleLabRecordExpanded(record)"
+                  @keydown.enter.prevent="toggleLabRecordExpanded(record)"
+                  @keydown.space.prevent="toggleLabRecordExpanded(record)"
+                >
+                  <div class="lab-record-list-header">
+                    <span class="entry-time">
+                      {{ getDateGroupLabel(record.updatedAt) }} · {{ formatEntryTime(record.updatedAt) }}
                     </span>
-                    <span class="record-type-pill" :class="`is-${record.type}`">
-                      {{ getLabRecordTypeLabel(record.type) }}
-                    </span>
-                    <button
-                      class="card-menu-trigger"
-                      :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'lab', recordId: record.id }) }"
-                      type="button"
-                      aria-haspopup="menu"
-                      :aria-expanded="isCardActionMenuOpenFor({ kind: 'lab', recordId: record.id })"
-                      aria-label="打开这条做记记录的操作菜单"
-                      @click.stop="toggleCardActionMenu({ kind: 'lab', recordId: record.id }, $event)"
-                    >
-                      ⋯
-                    </button>
+                    <div class="lab-record-list-badges">
+                      <span v-if="isFlagged(record.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
+                      <span v-if="isPinned(record.pinnedAt)" class="pin-pill">置顶</span>
+                      <span
+                        v-if="getCardTodo('project', record.id)"
+                        class="todo-mini-badge"
+                      >
+                        {{ getCardTodoIcon('project', record.id) }}
+                      </span>
+                      <span class="record-type-pill" :class="`is-${record.type}`">
+                        {{ getLabRecordTypeLabel(record.type) }}
+                      </span>
+                      <button
+                        class="card-menu-trigger"
+                        :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'lab', recordId: record.id }) }"
+                        type="button"
+                        aria-haspopup="menu"
+                        :aria-expanded="isCardActionMenuOpenFor({ kind: 'lab', recordId: record.id })"
+                        aria-label="打开这条做记记录的操作菜单"
+                        @click.stop="toggleCardActionMenu({ kind: 'lab', recordId: record.id }, $event)"
+                      >
+                        ⋯
+                      </button>
+                    </div>
                   </div>
+                  <strong>{{ record.title }}</strong>
+                  <p
+                    v-if="isLabRecordExpanded(record.id)"
+                    class="lab-record-preview"
+                    :data-reminder-target="`lab-record:${record.id}`"
+                    :data-todo-source="`project:${record.id}`"
+                    :class="{
+                      'has-reminder-target': isReminderHighlighted('lab-record', record.id),
+                      'has-todo-target': isCardTodoHighlighted('project', record.id),
+                    }"
+                    @click.stop="handleLabRecordContentClick(record, $event)"
+                    v-html="renderTodoContent(record.content, 'project', record.id, 'lab-record')"
+                  ></p>
+                  <p v-else class="lab-record-preview">{{ record.content }}</p>
                 </div>
-                <strong>{{ record.title }}</strong>
-                <p>{{ record.content }}</p>
-                <small>
-                  {{ record.branchId ? getBranchPathLabel(activeLabProjectBranches, record.branchId) : '未分组' }}
-                </small>
-                <small v-if="record.tags.length > 0">{{ record.tags.join(' / ') }}</small>
+
+                <div
+                  v-if="isLabRecordExpanded(record.id)"
+                  class="record-inline-panel"
+                >
+                  <template v-if="isLabRecordEditing(record.id)">
+                    <p class="eyebrow">编辑记录</p>
+
+                    <input
+                      v-model="editingLabRecordTitle"
+                      class="title-input"
+                      type="text"
+                      maxlength="80"
+                      aria-label="编辑项目记录标题"
+                    />
+
+                    <div class="lab-type-switcher" aria-label="编辑记录类型">
+                      <button
+                        v-for="type in labRecordTypeOptions"
+                        :key="type.value"
+                        type="button"
+                        class="lab-type-option"
+                        :class="[
+                          { active: editingLabRecordType === type.value },
+                          `is-${type.value}`,
+                        ]"
+                        @click="editingLabRecordType = type.value"
+                      >
+                        <strong>{{ type.label }}</strong>
+                        <span>{{ type.hint }}</span>
+                      </button>
+                    </div>
+
+                    <textarea
+                      v-model="editingLabRecordContent"
+                      class="journal-input edit-input"
+                      rows="10"
+                    />
+                    <label class="branch-field">
+                      <span>归属分支</span>
+                      <select v-model="editingLabRecordBranchValue" class="branch-select">
+                        <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+                        <option
+                          v-for="option in labBranchSelectOptions"
+                          :key="option.value"
+                          :value="option.value"
+                        >
+                          {{ option.label }}
+                        </option>
+                      </select>
+                    </label>
+                    <input
+                      v-model="editingLabRecordTags"
+                      class="search-input compact-input"
+                      type="text"
+                      placeholder="标签，用逗号分隔"
+                      aria-label="编辑项目记录标签"
+                    />
+                    <div class="entry-actions">
+                      <button class="ghost-action" type="button" @click="selectLabRecord(record)">
+                        取消
+                      </button>
+                      <button
+                        class="primary-action small"
+                        type="button"
+                        :disabled="!canSaveLabRecord"
+                        @click="saveLabRecordEditing"
+                      >
+                        保存修改
+                      </button>
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <div
+                      v-if="getCardTodo('project', record.id)"
+                      class="todo-card-strip"
+                      :data-todo-target="getCardTodo('project', record.id)?.id"
+                    >
+                      <button
+                        class="todo-card-toggle"
+                        type="button"
+                        @click="toggleCardTodo('project', record.id)"
+                      >
+                        {{ getCardTodoIcon('project', record.id) }}
+                      </button>
+                      <span>卡片待办</span>
+                      <small v-if="isCardTodoDone('project', record.id)">
+                        {{ getCardTodoDoneLabel('project', record.id) }}
+                      </small>
+                    </div>
+
+                    <div
+                      v-if="record.branchId"
+                      class="record-inline-meta"
+                    >
+                      <span>{{ getBranchPathLabel(activeLabProjectBranches, record.branchId) }}</span>
+                    </div>
+
+                    <div
+                      v-if="record.tags.length > 0"
+                      class="tag-row knowledge-detail-tags"
+                    >
+                      <span v-for="tag in record.tags" :key="tag">{{ tag }}</span>
+                    </div>
+
+                    <label
+                      v-if="getSentenceTodosForTarget('project', record.id).some((todo) => todo.status === 'done')"
+                      class="todo-hide-toggle"
+                    >
+                      <input v-model="hideDoneSentenceTodos" type="checkbox" />
+                      <span>隐藏已完成的待办</span>
+                    </label>
+
+                    <div
+                      v-if="getUnresolvedSentenceTodos('project', record.id, record.content).length > 0"
+                      class="todo-unresolved"
+                    >
+                      <span>
+                        有 {{ getUnresolvedSentenceTodos('project', record.id, record.content).length }} 个待办无法定位
+                      </span>
+                      <button type="button" @click="showUnresolvedTodoOriginals('project', record.id, record.content)">
+                        查看原文
+                      </button>
+                      <button type="button" @click="removeUnresolvedSentenceTodos('project', record.id, record.content)">
+                        删除
+                      </button>
+                    </div>
+                  </template>
+                </div>
               </article>
             </div>
 
@@ -7219,47 +7565,193 @@ onBeforeUnmount(() => {
                   class="lab-record-list-item is-todo-done"
                   :class="[
                     `is-${item.record.type}`,
+                    { active: isLabRecordExpanded(item.record.id) },
+                    { 'is-expanded': isLabRecordExpanded(item.record.id) },
                     { 'is-flagged': isFlagged(item.record.flaggedAt) },
                     { 'is-pinned': isPinned(item.record.pinnedAt) },
                   ]"
                   :data-todo-source="`project:${item.record.id}`"
                   :data-todo-target="item.todo.id"
-                  role="button"
-                  tabindex="0"
-                  @click="selectLabRecord(item.record)"
-                  @keydown.enter.prevent="selectLabRecord(item.record)"
-                  @keydown.space.prevent="selectLabRecord(item.record)"
                 >
-                  <div class="lab-record-list-header">
-                    <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
-                    <div class="lab-record-list-badges">
-                      <span v-if="isFlagged(item.record.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
-                      <span v-if="isPinned(item.record.pinnedAt)" class="pin-pill">置顶</span>
-                      <button
-                        class="todo-card-toggle is-done"
-                        type="button"
-                        @click.stop="toggleTodoStatus(item.todo)"
-                      >
-                        {{ getTodoStatusIcon(item.todo) }}
-                      </button>
-                      <button
-                        class="card-menu-trigger"
-                        :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'lab', recordId: item.record.id }) }"
-                        type="button"
-                        aria-haspopup="menu"
-                        :aria-expanded="isCardActionMenuOpenFor({ kind: 'lab', recordId: item.record.id })"
-                        aria-label="打开这条做记记录的操作菜单"
-                        @click.stop="toggleCardActionMenu({ kind: 'lab', recordId: item.record.id }, $event)"
-                      >
-                        ⋯
-                      </button>
+                  <div
+                    class="lab-record-summary"
+                    role="button"
+                    :tabindex="isLabRecordEditing(item.record.id) ? -1 : 0"
+                    :aria-expanded="isLabRecordExpanded(item.record.id)"
+                    @click="toggleLabRecordExpanded(item.record)"
+                    @keydown.enter.prevent="toggleLabRecordExpanded(item.record)"
+                    @keydown.space.prevent="toggleLabRecordExpanded(item.record)"
+                  >
+                    <div class="lab-record-list-header">
+                      <span class="entry-time">{{ formatTodoDateTime(item.todo.doneAt) }} 完成</span>
+                      <div class="lab-record-list-badges">
+                        <span v-if="isFlagged(item.record.flaggedAt)" class="flag-pill" aria-label="已标记重要">⚑</span>
+                        <span v-if="isPinned(item.record.pinnedAt)" class="pin-pill">置顶</span>
+                        <button
+                          class="todo-card-toggle is-done"
+                          type="button"
+                          @click.stop="toggleTodoStatus(item.todo)"
+                        >
+                          {{ getTodoStatusIcon(item.todo) }}
+                        </button>
+                        <button
+                          class="card-menu-trigger"
+                          :class="{ 'is-open': isCardActionMenuOpenFor({ kind: 'lab', recordId: item.record.id }) }"
+                          type="button"
+                          aria-haspopup="menu"
+                          :aria-expanded="isCardActionMenuOpenFor({ kind: 'lab', recordId: item.record.id })"
+                          aria-label="打开这条做记记录的操作菜单"
+                          @click.stop="toggleCardActionMenu({ kind: 'lab', recordId: item.record.id }, $event)"
+                        >
+                          ⋯
+                        </button>
+                      </div>
                     </div>
+                    <strong>{{ item.record.title }}</strong>
+                    <p
+                      v-if="isLabRecordExpanded(item.record.id)"
+                      class="lab-record-preview"
+                      :data-reminder-target="`lab-record:${item.record.id}`"
+                      :data-todo-source="`project:${item.record.id}`"
+                      :class="{
+                        'has-reminder-target': isReminderHighlighted('lab-record', item.record.id),
+                        'has-todo-target': isCardTodoHighlighted('project', item.record.id),
+                      }"
+                      @click.stop="handleLabRecordContentClick(item.record, $event)"
+                      v-html="renderTodoContent(item.record.content, 'project', item.record.id, 'lab-record')"
+                    ></p>
+                    <p v-else class="lab-record-preview">{{ item.record.content }}</p>
                   </div>
-                  <strong>{{ item.record.title }}</strong>
-                  <p>{{ item.record.content }}</p>
-                  <small>
-                    {{ item.record.branchId ? getBranchPathLabel(activeLabProjectBranches, item.record.branchId) : '未分组' }}
-                  </small>
+
+                  <div
+                    v-if="isLabRecordExpanded(item.record.id)"
+                    class="record-inline-panel"
+                  >
+                    <template v-if="isLabRecordEditing(item.record.id)">
+                      <p class="eyebrow">编辑记录</p>
+
+                      <input
+                        v-model="editingLabRecordTitle"
+                        class="title-input"
+                        type="text"
+                        maxlength="80"
+                        aria-label="编辑项目记录标题"
+                      />
+
+                      <div class="lab-type-switcher" aria-label="编辑记录类型">
+                        <button
+                          v-for="type in labRecordTypeOptions"
+                          :key="type.value"
+                          type="button"
+                          class="lab-type-option"
+                          :class="[
+                            { active: editingLabRecordType === type.value },
+                            `is-${type.value}`,
+                          ]"
+                          @click="editingLabRecordType = type.value"
+                        >
+                          <strong>{{ type.label }}</strong>
+                          <span>{{ type.hint }}</span>
+                        </button>
+                      </div>
+
+                      <textarea
+                        v-model="editingLabRecordContent"
+                        class="journal-input edit-input"
+                        rows="10"
+                      />
+                      <label class="branch-field">
+                        <span>归属分支</span>
+                        <select v-model="editingLabRecordBranchValue" class="branch-select">
+                          <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+                          <option
+                            v-for="option in labBranchSelectOptions"
+                            :key="option.value"
+                            :value="option.value"
+                          >
+                            {{ option.label }}
+                          </option>
+                        </select>
+                      </label>
+                      <input
+                        v-model="editingLabRecordTags"
+                        class="search-input compact-input"
+                        type="text"
+                        placeholder="标签，用逗号分隔"
+                        aria-label="编辑项目记录标签"
+                      />
+                      <div class="entry-actions">
+                        <button class="ghost-action" type="button" @click="selectLabRecord(item.record)">
+                          取消
+                        </button>
+                        <button
+                          class="primary-action small"
+                          type="button"
+                          :disabled="!canSaveLabRecord"
+                          @click="saveLabRecordEditing"
+                        >
+                          保存修改
+                        </button>
+                      </div>
+                    </template>
+
+                    <template v-else>
+                      <div
+                        v-if="getCardTodo('project', item.record.id)"
+                        class="todo-card-strip"
+                        :data-todo-target="getCardTodo('project', item.record.id)?.id"
+                      >
+                        <button
+                          class="todo-card-toggle"
+                          type="button"
+                          @click="toggleCardTodo('project', item.record.id)"
+                        >
+                          {{ getCardTodoIcon('project', item.record.id) }}
+                        </button>
+                        <span>卡片待办</span>
+                        <small v-if="isCardTodoDone('project', item.record.id)">
+                          {{ getCardTodoDoneLabel('project', item.record.id) }}
+                        </small>
+                      </div>
+
+                      <div
+                        v-if="item.record.branchId"
+                        class="record-inline-meta"
+                      >
+                        <span>{{ getBranchPathLabel(activeLabProjectBranches, item.record.branchId) }}</span>
+                      </div>
+
+                      <div
+                        v-if="item.record.tags.length > 0"
+                        class="tag-row knowledge-detail-tags"
+                      >
+                        <span v-for="tag in item.record.tags" :key="tag">{{ tag }}</span>
+                      </div>
+
+                      <label
+                        v-if="getSentenceTodosForTarget('project', item.record.id).some((todo) => todo.status === 'done')"
+                        class="todo-hide-toggle"
+                      >
+                        <input v-model="hideDoneSentenceTodos" type="checkbox" />
+                        <span>隐藏已完成的待办</span>
+                      </label>
+
+                      <div
+                        v-if="getUnresolvedSentenceTodos('project', item.record.id, item.record.content).length > 0"
+                        class="todo-unresolved"
+                      >
+                        <span>
+                          有 {{ getUnresolvedSentenceTodos('project', item.record.id, item.record.content).length }} 个待办无法定位
+                        </span>
+                        <button type="button" @click="showUnresolvedTodoOriginals('project', item.record.id, item.record.content)">
+                          查看原文
+                        </button>
+                        <button type="button" @click="removeUnresolvedSentenceTodos('project', item.record.id, item.record.content)">
+                          删除
+                        </button>
+                      </div>
+                    </template>
+                  </div>
                 </article>
               </div>
             </section>
@@ -7276,7 +7768,11 @@ onBeforeUnmount(() => {
           </button>
         </section>
 
-        <section class="lab-inspector" aria-labelledby="lab-inspector-title">
+        <section
+          v-if="showLabInspector"
+          class="lab-inspector"
+          aria-labelledby="lab-inspector-title"
+        >
           <template v-if="!activeLabProject">
             <div class="empty-state knowledge-empty-state">
               <p>这里会显示项目概览或具体记录。</p>
