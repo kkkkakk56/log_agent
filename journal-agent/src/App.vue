@@ -190,6 +190,19 @@ interface BranchTreeItem {
   pathLabel: string;
 }
 
+interface SearchMatchRange {
+  start: number;
+  end: number;
+}
+
+interface JournalSearchResult {
+  entry: JournalEntry;
+  titleHtml: string;
+  previewHtml: string;
+  fullContentHtml: string;
+  matchedTagsHtml: string[];
+}
+
 const LAB_RECORD_TYPE_META: Record<LabRecordType, { label: string }> = {
   operation: { label: '操作' },
   review: { label: '复盘' },
@@ -200,6 +213,9 @@ const AGENT_FAB_DEFAULT_WIDTH = 112;
 const AGENT_FAB_DEFAULT_HEIGHT = 52;
 const AGENT_DRAG_THRESHOLD = 6;
 const BRANCH_UNGROUPED_VALUE = '__ungrouped__';
+const SEARCH_KEYWORD_SPLIT_PATTERN = /[\s,，、/／]+/;
+const SEARCH_EXCERPT_CONTEXT_LENGTH = 56;
+const SEARCH_EXCERPT_FALLBACK_LENGTH = 120;
 
 const labRecordTypeOptions: Array<{
   value: LabRecordType;
@@ -307,6 +323,7 @@ const editingLabRecordType = ref<LabRecordType>('operation');
 const editingLabRecordTags = ref('');
 const editingLabRecordBranchValue = ref(BRANCH_UNGROUPED_VALUE);
 const searchQuery = ref('');
+const searchInputRef = ref<HTMLInputElement | null>(null);
 const calendarMonth = ref(startOfMonth(new Date()));
 const selectedDateKey = ref(getLocalDateKey(new Date()));
 const agentPanelOpen = ref(false);
@@ -819,22 +836,30 @@ const canSaveReminder = computed(() => {
   );
 });
 
-const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLocaleLowerCase());
+const searchKeywords = computed(() => buildSearchKeywords(searchQuery.value));
+
+const searchableJournalEntries = computed(() =>
+  visibleJournalEntries.value.map((entry) => ({
+    entry,
+    searchableText: normalizeSearchText([entry.title, entry.content, ...entry.tags].join('\n')),
+  })),
+);
 
 const searchResults = computed(() => {
-  const query = normalizedSearchQuery.value;
+  const keywords = searchKeywords.value;
 
-  if (!query) {
+  if (keywords.length === 0) {
     return [];
   }
 
-  return visibleJournalEntries.value.filter((entry) => {
-    const searchableText = [entry.title, entry.content, ...entry.tags]
-      .join(' ')
-      .toLocaleLowerCase();
+  return searchableJournalEntries.value.reduce<JournalSearchResult[]>((results, item) => {
+    if (!keywords.every((keyword) => item.searchableText.includes(keyword))) {
+      return results;
+    }
 
-    return searchableText.includes(query);
-  });
+    results.push(buildJournalSearchResult(item.entry, keywords));
+    return results;
+  }, []);
 });
 
 const calendarDays = computed(() => buildCalendarDays(calendarMonth.value));
@@ -855,6 +880,14 @@ const selectedDateCompletedEntryItems = computed(() =>
 const selectedDateLabel = computed(() => {
   return formatJournalDateKeyLabel(selectedDateKey.value);
 });
+
+function clearSearchQuery() {
+  searchQuery.value = '';
+
+  nextTick(() => {
+    searchInputRef.value?.focus();
+  });
+}
 
 function refreshEntries() {
   entries.value = getEntries();
@@ -2429,6 +2462,187 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function normalizeSearchText(value: string): string {
+  return value.toLocaleLowerCase();
+}
+
+function buildSearchKeywords(rawQuery: string): string[] {
+  const seenKeywords = new Set<string>();
+
+  return rawQuery
+    .split(SEARCH_KEYWORD_SPLIT_PATTERN)
+    .map((keyword) => normalizeSearchText(keyword.trim()))
+    .filter((keyword) => keyword.length > 0)
+    .filter((keyword) => {
+      if (seenKeywords.has(keyword)) {
+        return false;
+      }
+
+      seenKeywords.add(keyword);
+      return true;
+    })
+    .sort((firstKeyword, secondKeyword) => secondKeyword.length - firstKeyword.length);
+}
+
+function normalizeSearchMatchRanges(ranges: SearchMatchRange[]): SearchMatchRange[] {
+  return [...ranges]
+    .sort((firstRange, secondRange) => {
+      if (firstRange.start !== secondRange.start) {
+        return firstRange.start - secondRange.start;
+      }
+
+      return secondRange.end - firstRange.end;
+    })
+    .reduce<SearchMatchRange[]>((acceptedRanges, range) => {
+      const previousRange = acceptedRanges[acceptedRanges.length - 1];
+
+      if (!previousRange) {
+        acceptedRanges.push({ ...range });
+        return acceptedRanges;
+      }
+
+      if (range.start <= previousRange.end) {
+        previousRange.end = Math.max(previousRange.end, range.end);
+        return acceptedRanges;
+      }
+
+      acceptedRanges.push({ ...range });
+      return acceptedRanges;
+    }, []);
+}
+
+function collectSearchMatchRanges(
+  text: string,
+  keywords: string[],
+): SearchMatchRange[] {
+  if (!text || keywords.length === 0) {
+    return [];
+  }
+
+  const normalizedText = normalizeSearchText(text);
+  const ranges: SearchMatchRange[] = [];
+
+  for (const keyword of keywords) {
+    let fromIndex = 0;
+
+    while (fromIndex < normalizedText.length) {
+      const matchIndex = normalizedText.indexOf(keyword, fromIndex);
+
+      if (matchIndex === -1) {
+        break;
+      }
+
+      ranges.push({
+        start: matchIndex,
+        end: matchIndex + keyword.length,
+      });
+      fromIndex = matchIndex + Math.max(keyword.length, 1);
+    }
+  }
+
+  return normalizeSearchMatchRanges(ranges);
+}
+
+function renderSearchHighlightedHtml(
+  text: string,
+  ranges: SearchMatchRange[],
+): string {
+  if (!text) {
+    return '';
+  }
+
+  const normalizedRanges = normalizeSearchMatchRanges(ranges);
+
+  if (normalizedRanges.length === 0) {
+    return escapeHtml(text);
+  }
+
+  let renderedHtml = '';
+  let cursor = 0;
+
+  for (const range of normalizedRanges) {
+    renderedHtml += escapeHtml(text.slice(cursor, range.start));
+    renderedHtml += [
+      '<mark class="search-keyword-highlight">',
+      escapeHtml(text.slice(range.start, range.end)),
+      '</mark>',
+    ].join('');
+    cursor = range.end;
+  }
+
+  renderedHtml += escapeHtml(text.slice(cursor));
+  return renderedHtml;
+}
+
+function buildSearchPreview(
+  content: string,
+  contentMatches: SearchMatchRange[],
+): { text: string; ranges: SearchMatchRange[] } {
+  if (!content) {
+    return { text: '', ranges: [] };
+  }
+
+  if (contentMatches.length === 0) {
+    const previewText =
+      content.length > SEARCH_EXCERPT_FALLBACK_LENGTH
+        ? `${content.slice(0, SEARCH_EXCERPT_FALLBACK_LENGTH).trimEnd()}…`
+        : content;
+
+    return {
+      text: previewText,
+      ranges: [],
+    };
+  }
+
+  const firstMatch = contentMatches[0];
+  const rawStart = Math.max(0, firstMatch.start - SEARCH_EXCERPT_CONTEXT_LENGTH);
+  const rawEnd = Math.min(content.length, firstMatch.end + SEARCH_EXCERPT_CONTEXT_LENGTH);
+  const rawPreview = content.slice(rawStart, rawEnd);
+  const leadingWhitespaceLength = rawPreview.match(/^\s*/)?.[0].length ?? 0;
+  const trailingWhitespaceLength = rawPreview.match(/\s*$/)?.[0].length ?? 0;
+  const previewStart = rawStart + leadingWhitespaceLength;
+  const previewEnd =
+    trailingWhitespaceLength > 0 ? rawEnd - trailingWhitespaceLength : rawEnd;
+  const previewCore = content.slice(previewStart, previewEnd);
+  const hasLeadingEllipsis = previewStart > 0;
+  const hasTrailingEllipsis = previewEnd < content.length;
+  const prefixLength = hasLeadingEllipsis ? 1 : 0;
+
+  return {
+    text: `${hasLeadingEllipsis ? '…' : ''}${previewCore}${hasTrailingEllipsis ? '…' : ''}`,
+    ranges: contentMatches
+      .filter((range) => range.end > previewStart && range.start < previewEnd)
+      .map((range) => ({
+        start: Math.max(range.start, previewStart) - previewStart + prefixLength,
+        end: Math.min(range.end, previewEnd) - previewStart + prefixLength,
+      })),
+  };
+}
+
+function buildJournalSearchResult(
+  entry: JournalEntry,
+  keywords: string[],
+): JournalSearchResult {
+  const titleMatches = collectSearchMatchRanges(entry.title, keywords);
+  const contentMatches = collectSearchMatchRanges(entry.content, keywords);
+  const matchedTagsHtml = entry.tags
+    .map((tag) => ({
+      tag,
+      matches: collectSearchMatchRanges(tag, keywords),
+    }))
+    .filter((tagItem) => tagItem.matches.length > 0)
+    .map((tagItem) => renderSearchHighlightedHtml(tagItem.tag, tagItem.matches));
+  const preview = buildSearchPreview(entry.content, contentMatches);
+
+  return {
+    entry,
+    titleHtml: renderSearchHighlightedHtml(entry.title || '无标题', titleMatches),
+    previewHtml: renderSearchHighlightedHtml(preview.text, preview.ranges),
+    fullContentHtml: renderSearchHighlightedHtml(entry.content, contentMatches),
+    matchedTagsHtml,
+  };
 }
 
 function renderReminderHighlightedContent(
@@ -4327,14 +4541,26 @@ onBeforeUnmount(() => {
         <span class="counter">{{ searchResults.length }} 条</span>
       </div>
 
-      <input
-        v-model="searchQuery"
-        class="search-input"
-        type="search"
-        placeholder="搜索关键词，例如：iCloud / 工作 / 灵感"
-      />
+      <div class="search-input-row">
+        <input
+          ref="searchInputRef"
+          v-model="searchQuery"
+          class="search-input"
+          type="search"
+          placeholder="搜索关键词，例如：iCloud / 工作 / 灵感"
+          @keydown.escape.stop="clearSearchQuery"
+        />
+        <button
+          v-if="searchQuery.trim().length > 0"
+          class="search-clear-button"
+          type="button"
+          @click="clearSearchQuery"
+        >
+          清空
+        </button>
+      </div>
 
-      <div v-if="!normalizedSearchQuery" class="empty-state">
+      <div v-if="searchKeywords.length === 0" class="empty-state">
         <p>输入关键词开始查找。</p>
         <span>会同时搜索标题、正文和未来的标签。</span>
       </div>
@@ -4346,18 +4572,18 @@ onBeforeUnmount(() => {
 
       <div v-else class="entry-groups search-results">
         <article
-          v-for="entry in searchResults"
-          :key="entry.id"
+          v-for="result in searchResults"
+          :key="result.entry.id"
           class="entry-card"
-          :data-reminder-target="`journal-entry:${entry.id}`"
-          :data-todo-source="`journal:${entry.id}`"
+          :data-reminder-target="`journal-entry:${result.entry.id}`"
+          :data-todo-source="`journal:${result.entry.id}`"
           :class="{
-            'is-expanded': isJournalEntryExpanded(entry.id),
-            'is-reminder-target': isReminderHighlighted('journal-entry', entry.id),
-            'is-todo-highlighted': isCardTodoHighlighted('journal', entry.id),
+            'is-expanded': isJournalEntryExpanded(result.entry.id),
+            'is-reminder-target': isReminderHighlighted('journal-entry', result.entry.id),
+            'is-todo-highlighted': isCardTodoHighlighted('journal', result.entry.id),
           }"
         >
-          <template v-if="editingId === entry.id">
+          <template v-if="editingId === result.entry.id">
             <label class="journal-date-field compact">
               <span>归属日期</span>
               <input
@@ -4383,74 +4609,108 @@ onBeforeUnmount(() => {
 
           <template v-else>
             <div
-              v-if="getCardTodo('journal', entry.id)"
+              v-if="getCardTodo('journal', result.entry.id)"
               class="todo-card-strip"
-              :data-todo-target="getCardTodo('journal', entry.id)?.id"
+              :data-todo-target="getCardTodo('journal', result.entry.id)?.id"
             >
               <button
                 class="todo-card-toggle"
                 type="button"
-                @click="toggleCardTodo('journal', entry.id)"
+                @click="toggleCardTodo('journal', result.entry.id)"
               >
-                {{ getCardTodoIcon('journal', entry.id) }}
+                {{ getCardTodoIcon('journal', result.entry.id) }}
               </button>
               <span>卡片待办</span>
-              <small v-if="isCardTodoDone('journal', entry.id)">
-                {{ getCardTodoDoneLabel('journal', entry.id) }}
+              <small v-if="isCardTodoDone('journal', result.entry.id)">
+                {{ getCardTodoDoneLabel('journal', result.entry.id) }}
               </small>
             </div>
             <div
               class="entry-body selectable-entry-body"
-              @click="toggleJournalEntryExpanded(entry.id)"
+              @click="toggleJournalEntryExpanded(result.entry.id)"
             >
               <span class="entry-time">
-                {{ getJournalEntryDateLabel(entry) }} · 创建 {{ formatEntryTime(entry.createdAt) }}
+                {{ getJournalEntryDateLabel(result.entry) }} · 创建 {{ formatEntryTime(result.entry.createdAt) }}
               </span>
-              <strong>{{ entry.title }}</strong>
+              <strong v-html="result.titleHtml"></strong>
               <p
-                @click.stop="handleJournalEntryContentClick(entry.id, $event)"
-                v-html="renderTodoContent(entry.content, 'journal', entry.id, 'journal-entry')"
+                v-if="result.previewHtml || result.fullContentHtml"
+                class="search-result-preview"
+                v-html="
+                  isJournalEntryExpanded(result.entry.id)
+                    ? result.fullContentHtml
+                    : result.previewHtml
+                "
               ></p>
+              <div
+                v-if="result.matchedTagsHtml.length > 0"
+                class="search-tag-hit-list"
+              >
+                <span class="search-hit-label">匹配标签</span>
+                <span
+                  v-for="(tagHtml, index) in result.matchedTagsHtml"
+                  :key="`${result.entry.id}-tag-${index}`"
+                  class="search-tag-hit"
+                  v-html="tagHtml"
+                ></span>
+              </div>
             </div>
 
             <div
-              v-if="getUnresolvedSentenceTodos('journal', entry.id, entry.content).length > 0"
+              v-if="getUnresolvedSentenceTodos('journal', result.entry.id, result.entry.content).length > 0"
               class="todo-unresolved"
             >
               <span>
-                有 {{ getUnresolvedSentenceTodos('journal', entry.id, entry.content).length }} 个待办无法定位
+                有 {{ getUnresolvedSentenceTodos('journal', result.entry.id, result.entry.content).length }} 个待办无法定位
               </span>
-              <button type="button" @click="showUnresolvedTodoOriginals('journal', entry.id, entry.content)">
+              <button
+                type="button"
+                @click="showUnresolvedTodoOriginals('journal', result.entry.id, result.entry.content)"
+              >
                 查看原文
               </button>
-              <button type="button" @click="removeUnresolvedSentenceTodos('journal', entry.id, entry.content)">
+              <button
+                type="button"
+                @click="removeUnresolvedSentenceTodos('journal', result.entry.id, result.entry.content)"
+              >
                 删除
               </button>
             </div>
 
             <div class="entry-footer">
               <span class="entry-footnote">
-                {{ entry.content.length }} 字
-                <i v-if="isFutureDateKey(getJournalEntryDateKey(entry))" class="future-entry-badge">
+                {{ result.entry.content.length }} 字
+                <i
+                  v-if="isFutureDateKey(getJournalEntryDateKey(result.entry))"
+                  class="future-entry-badge"
+                >
                   未来
                 </i>
               </span>
               <div class="entry-footer-actions">
-                <button class="ghost-action reminder-action" type="button" @click="openJournalReminderComposer(entry)">
+                <button
+                  class="ghost-action reminder-action"
+                  type="button"
+                  @click="openJournalReminderComposer(result.entry)"
+                >
                   提醒
                 </button>
                 <button
                   class="ghost-action reminder-action"
                   type="button"
                   @pointerdown="captureTodoSelectionFromWindow"
-                  @click="createJournalTodo(entry)"
+                  @click="createJournalTodo(result.entry)"
                 >
                   待办
                 </button>
-                <button class="ghost-action reminder-action" type="button" @click="startEditing(entry)">
+                <button
+                  class="ghost-action reminder-action"
+                  type="button"
+                  @click="startEditing(result.entry)"
+                >
                   编辑
                 </button>
-                <button class="delete-action" type="button" @click="removeEntry(entry)">
+                <button class="delete-action" type="button" @click="removeEntry(result.entry)">
                   删除
                 </button>
               </div>
