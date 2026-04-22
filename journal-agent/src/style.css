@@ -164,6 +164,7 @@ body {
   margin: 0;
   background: var(--bg-canvas);
   color: var(--ink-2);
+  overflow-x: hidden;
 }
 
 button, input, textarea, select { font: inherit; color: inherit; }
@@ -214,13 +215,15 @@ a { color: var(--accent); text-decoration: none; }
 #app { min-height: 100vh; }
 
 .journal-app {
+  width: 100%;
   min-height: 100vh;
   max-width: 780px;
   margin: 0 auto;
   padding:
-    calc(72px + env(safe-area-inset-top))
-    18px
-    calc(120px + env(safe-area-inset-bottom));
+    calc(32px + env(safe-area-inset-top))
+    calc(18px + env(safe-area-inset-right))
+    calc(120px + env(safe-area-inset-bottom))
+    calc(18px + env(safe-area-inset-left));
   background: var(--bg-canvas);
   position: relative;
 }
@@ -303,6 +306,7 @@ a { color: var(--accent); text-decoration: none; }
   display: inline-flex;
   align-self: flex-start;
   gap: 2px;
+  max-width: 100%;
   padding: 4px;
   background: var(--bg-elev-1);
   border: 1px solid var(--line-1);
@@ -340,6 +344,7 @@ a { color: var(--accent); text-decoration: none; }
   font-size: 32px;
   letter-spacing: -0.02em;
   color: var(--ink-1);
+  overflow-wrap: anywhere;
 }
 .icon-button {
   width: 38px; height: 38px;
@@ -788,6 +793,7 @@ a { color: var(--accent); text-decoration: none; }
 .entry-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
@@ -815,6 +821,7 @@ a { color: var(--accent); text-decoration: none; }
 .todo-card-strip {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 9px;
   padding: 8px 10px;
   color: var(--ink-3);
@@ -1277,10 +1284,12 @@ a { color: var(--accent); text-decoration: none; }
   position: fixed;
   top: 0; left: 0; bottom: 0;
   width: min(86vw, 360px);
+  max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
   padding:
     calc(28px + env(safe-area-inset-top))
-    20px
-    calc(28px + env(safe-area-inset-bottom));
+    calc(20px + env(safe-area-inset-right))
+    calc(28px + env(safe-area-inset-bottom))
+    calc(20px + env(safe-area-inset-left));
   background: var(--bg-elev-1);
   border-right: 1px solid var(--line-1);
   box-shadow: var(--shadow-float);
@@ -1302,6 +1311,7 @@ a { color: var(--accent); text-decoration: none; }
 .knowledge-pane-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -1331,6 +1341,7 @@ a { color: var(--accent); text-decoration: none; }
   font-weight: 500;
   font-size: 16px;
   color: var(--ink-1);
+  overflow-wrap: anywhere;
 }
 .knowledge-base-list button span { font-size: 12px; color: var(--ink-4); }
 .knowledge-base-list button small { font-size: 11px; color: var(--ink-4); }
@@ -1426,6 +1437,7 @@ a { color: var(--accent); text-decoration: none; }
 .branch-filter-item span {
   color: var(--ink-1);
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 .branch-filter-item small {
   color: var(--ink-4);
@@ -1450,6 +1462,7 @@ a { color: var(--accent); text-decoration: none; }
 .branch-selection-card strong {
   color: var(--ink-1);
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 .branch-selection-card small {
   display: block;
@@ -1530,6 +1543,7 @@ a { color: var(--accent); text-decoration: none; }
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
   padding: 22px;
   background: var(--bg-elev-1);
   border: 1px solid var(--line-1);
@@ -1570,6 +1584,7 @@ a { color: var(--accent); text-decoration: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
 }
 .list-title-row strong {
@@ -1579,6 +1594,8 @@ a { color: var(--accent); text-decoration: none; }
 .list-title-badges {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -1587,6 +1604,7 @@ a { color: var(--accent); text-decoration: none; }
   font-weight: 500;
   font-size: 15px;
   color: var(--ink-1);
+  overflow-wrap: anywhere;
 }
 .knowledge-note-preview,
 .lab-record-preview {
@@ -1594,6 +1612,7 @@ a { color: var(--accent); text-decoration: none; }
   font-size: 13px;
   color: var(--ink-3);
   line-height: 1.58;
+  overflow-wrap: anywhere;
   position: relative;
   overflow: hidden;
   max-height: calc(1.58em * 4);
@@ -1662,6 +1681,7 @@ a { color: var(--accent); text-decoration: none; }
   font-weight: 500;
   font-size: 15px;
   color: var(--ink-1);
+  overflow-wrap: anywhere;
 }
 .lab-record-list-item small { font-size: 11px; color: var(--ink-4); }
 .lab-record-list-item:hover { border-color: var(--line-strong); }
@@ -1688,12 +1708,16 @@ a { color: var(--accent); text-decoration: none; }
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
 }
 .lab-record-list-badges {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
   flex-shrink: 0;
 }
 .todo-mini-badge {
@@ -1938,7 +1962,8 @@ a { color: var(--accent); text-decoration: none; }
 
 .knowledge-note-fab {
   position: absolute;
-  right: 18px; bottom: 18px;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(18px + env(safe-area-inset-bottom));
   width: 48px; height: 48px;
   border-radius: 50%;
   background: var(--ink-1);
@@ -2022,6 +2047,7 @@ a { color: var(--accent); text-decoration: none; }
   font-size: 16px;
   line-height: 1.7;
   color: var(--ink-2);
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
   text-wrap: pretty;
   -webkit-user-select: text;
@@ -2041,7 +2067,11 @@ a { color: var(--accent); text-decoration: none; }
   padding-top: 10px;
   border-top: 1px solid var(--line-2);
 }
-.knowledge-inline-actions { display: flex; gap: 10px; }
+.knowledge-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 
 /* ---------- 13b. Global todo view ---------- */
 .todo-workspace {
@@ -2187,6 +2217,7 @@ a { color: var(--accent); text-decoration: none; }
 .todo-completion-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -2701,7 +2732,11 @@ a { color: var(--accent); text-decoration: none; }
 
 /* ---------- 18. Responsive tweaks ---------- */
 @media (max-width: 480px) {
-  .journal-app { padding-left: 14px; padding-right: 14px; }
+  .journal-app {
+    padding-top: calc(15px + env(safe-area-inset-top));
+    padding-left: calc(14px + env(safe-area-inset-left));
+    padding-right: calc(14px + env(safe-area-inset-right));
+  }
   .hero-panel h1 { font-size: 34px; }
   .hero-content-row { gap: 12px; }
   .compose-card, .tool-card, .park-placeholder,
@@ -2720,6 +2755,75 @@ a { color: var(--accent); text-decoration: none; }
   }
   .reminder-modal {
     padding: 18px;
+  }
+}
+
+@media (max-width: 560px) {
+  .park-switcher {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-self: stretch;
+    width: 100%;
+  }
+
+  .park-switcher button {
+    min-width: 0;
+    padding: 9px 4px;
+    font-size: 12px;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .knowledge-page-title {
+    font-size: 28px;
+    line-height: 1.12;
+  }
+
+  .section-heading,
+  .list-title-row,
+  .lab-record-list-header,
+  .image-preview-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .knowledge-pane-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .knowledge-pane-actions,
+  .list-title-badges,
+  .lab-record-list-badges,
+  .knowledge-inline-actions {
+    justify-content: flex-start;
+  }
+
+  .knowledge-detail-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .branch-archived-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .branch-archived-item .ghost-action {
+    align-self: flex-start;
+  }
+
+  .lab-project-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .todo-card-strip {
+    align-items: flex-start;
+  }
+
+  .todo-card-strip small {
+    width: 100%;
+    margin-left: 0;
   }
 }
 
