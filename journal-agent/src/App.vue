@@ -46,6 +46,7 @@ import {
   cancelRemindersForTarget,
   createReminder,
   getActiveReminders,
+  getUpcomingActiveReminders,
   getReminderById,
   updateReminder,
 } from './storage/reminderStore';
@@ -121,6 +122,7 @@ import {
   listenForReminderNotificationActions,
   scheduleDailyJournalReminderNotification,
   scheduleReminderNotification,
+  scheduleReminderNotifications,
 } from './services/reminderNotifications';
 import { createAnchor, resolveAnchor, type TextAnchor } from './utils/textAnchor';
 import {
@@ -1564,8 +1566,12 @@ function handleDocumentVisibilityChange() {
     lockVault('密库已自动上锁。');
   }
 
-  if (!document.hidden && shouldRefreshJournalWeather()) {
-    void refreshJournalWeather({ background: true });
+  if (!document.hidden) {
+    if (shouldRefreshJournalWeather()) {
+      void refreshJournalWeather({ background: true });
+    }
+
+    syncRecordRemindersOnLaunch();
   }
 }
 
@@ -2733,6 +2739,26 @@ function scheduleSavedReminder(reminder: RecordReminder) {
       : `提醒已保存在 App 内，但系统通知暂未启动：${scheduleResult.message}`;
     refreshReminders();
   });
+}
+
+function syncRecordRemindersOnLaunch() {
+  if (recordReminderSyncPromise) {
+    return;
+  }
+
+  const upcomingReminders = getUpcomingActiveReminders();
+
+  if (upcomingReminders.length === 0) {
+    refreshReminders();
+    return;
+  }
+
+  recordReminderSyncPromise = scheduleReminderNotifications(upcomingReminders)
+    .catch(() => undefined)
+    .finally(() => {
+      refreshReminders();
+      recordReminderSyncPromise = null;
+    });
 }
 
 function saveReminder() {
@@ -5285,6 +5311,7 @@ async function submitAgentMessage() {
 let removeReminderNotificationActionListener: (() => void) | null = null;
 let weatherRefreshTimer: number | null = null;
 let weatherAbortController: AbortController | null = null;
+let recordReminderSyncPromise: Promise<unknown> | null = null;
 
 onMounted(() => {
   document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
@@ -5297,6 +5324,7 @@ onMounted(() => {
   void nextTick(initializeAgentFabPosition);
   void refreshJournalWeather();
   scheduleWeatherRefresh();
+  syncRecordRemindersOnLaunch();
   void syncDailyJournalReminderOnLaunch();
   void listenForReminderNotificationActions((action) => {
     if (action.kind === 'daily-journal-reminder') {

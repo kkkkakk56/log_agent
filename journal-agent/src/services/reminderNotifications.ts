@@ -122,12 +122,30 @@ const ensureLocalNotificationPermissionGranted = async (): Promise<boolean> => {
   return finalPermission.display === 'granted';
 };
 
-export const scheduleReminderNotification = async (
-  reminder: RecordReminder,
-): Promise<ReminderScheduleResult> => {
-  const scheduledAt = new Date(reminder.scheduledAt);
+const getFutureReminders = (reminders: RecordReminder[]): RecordReminder[] =>
+  reminders.filter((reminder) => {
+    const scheduledAt = new Date(reminder.scheduledAt).getTime();
+    return !Number.isNaN(scheduledAt) && scheduledAt > Date.now();
+  });
 
-  if (Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+const buildRecordNotification = (reminder: RecordReminder) => ({
+  id: reminder.notificationId,
+  title: reminder.reminderTitle,
+  body: getReminderBody(reminder),
+  largeBody: getReminderBody(reminder),
+  schedule: {
+    at: new Date(reminder.scheduledAt),
+    allowWhileIdle: true,
+  },
+  extra: getReminderExtra(reminder),
+});
+
+export const scheduleReminderNotifications = async (
+  reminders: RecordReminder[],
+): Promise<ReminderScheduleResult> => {
+  const futureReminders = getFutureReminders(reminders);
+
+  if (futureReminders.length === 0) {
     return {
       ok: false,
       message: '提醒时间需要晚于当前时间。',
@@ -137,7 +155,10 @@ export const scheduleReminderNotification = async (
   if (!Capacitor.isNativePlatform()) {
     return {
       ok: true,
-      message: '提醒已保存；浏览器预览不会在 App 关闭后弹系统通知，真机同步后会使用系统提醒。',
+      message:
+        futureReminders.length === 1
+          ? '提醒已保存；浏览器预览不会在 App 关闭后弹系统通知，真机同步后会使用系统提醒。'
+          : `已保存 ${futureReminders.length} 条提醒；浏览器预览不会在 App 关闭后弹系统通知，真机同步后会使用系统提醒。`,
     };
   }
 
@@ -160,26 +181,17 @@ export const scheduleReminderNotification = async (
 
     await withTimeout(
       LocalNotifications.schedule({
-        notifications: [
-          {
-            id: reminder.notificationId,
-            title: reminder.reminderTitle,
-            body: getReminderBody(reminder),
-            largeBody: getReminderBody(reminder),
-            schedule: {
-              at: scheduledAt,
-              allowWhileIdle: true,
-            },
-            extra: getReminderExtra(reminder),
-          },
-        ],
+        notifications: futureReminders.map(buildRecordNotification),
       }),
-      'schedule local notification',
+      'schedule local notifications',
     );
 
     return {
       ok: true,
-      message: '提醒已交给系统，到点会通知你。',
+      message:
+        futureReminders.length === 1
+          ? '提醒已交给系统，到点会通知你。'
+          : `已把 ${futureReminders.length} 条提醒重新交给系统，到点会依次通知你。`,
     };
   } catch (error) {
     return {
@@ -190,6 +202,11 @@ export const scheduleReminderNotification = async (
     };
   }
 };
+
+export const scheduleReminderNotification = async (
+  reminder: RecordReminder,
+): Promise<ReminderScheduleResult> =>
+  scheduleReminderNotifications([reminder]);
 
 export const scheduleDailyJournalReminderNotification = async (
   hour: number,

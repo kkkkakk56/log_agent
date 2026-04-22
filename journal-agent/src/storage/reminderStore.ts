@@ -83,11 +83,24 @@ const createId = (prefix: string): string => {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-const createNotificationId = (): number => {
-  const nowPart = Date.now() % 1_000_000_000;
-  const randomPart = Math.floor(Math.random() * 100_000);
+const createNotificationId = (existingIds: Set<number>): number => {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const nowPart = Date.now() % 1_000_000_000;
+    const randomPart = Math.floor(Math.random() * 100_000);
+    const candidateId = nowPart + randomPart;
 
-  return nowPart + randomPart;
+    if (!existingIds.has(candidateId)) {
+      return candidateId;
+    }
+  }
+
+  let fallbackId = Date.now() % 1_000_000_000;
+
+  while (existingIds.has(fallbackId)) {
+    fallbackId += 1;
+  }
+
+  return fallbackId;
 };
 
 const normalizeTitle = (value: string, fallback: string): string => {
@@ -114,6 +127,21 @@ export const getActiveReminders = (): RecordReminder[] =>
     readReminders().filter((reminder) => reminder.canceledAt === null),
   );
 
+export const getUpcomingActiveReminders = (): RecordReminder[] => {
+  const now = Date.now();
+
+  return sortByScheduledAtAsc(
+    readReminders().filter((reminder) => {
+      if (reminder.canceledAt !== null) {
+        return false;
+      }
+
+      const scheduledAt = new Date(reminder.scheduledAt).getTime();
+      return !Number.isNaN(scheduledAt) && scheduledAt > now;
+    }),
+  );
+};
+
 export const getReminderById = (id: string): RecordReminder | null =>
   readReminders().find((reminder) => reminder.id === id) ?? null;
 
@@ -126,10 +154,13 @@ export const createReminder = (
     return null;
   }
 
+  const reminders = readReminders();
   const now = new Date().toISOString();
   const reminder: RecordReminder = {
     id: createId('record-reminder'),
-    notificationId: createNotificationId(),
+    notificationId: createNotificationId(
+      new Set(reminders.map((reminderItem) => reminderItem.notificationId)),
+    ),
     targetType: fields.targetType,
     targetId: fields.targetId,
     parentId: fields.parentId,
@@ -146,7 +177,7 @@ export const createReminder = (
     canceledAt: null,
   };
 
-  return writeReminders([...readReminders(), reminder]) ? reminder : null;
+  return writeReminders([...reminders, reminder]) ? reminder : null;
 };
 
 export const updateReminder = (
