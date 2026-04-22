@@ -1744,6 +1744,30 @@
       "notes": "已完成。当前版本不新增云端或原生文件系统依赖，而是在客户端压缩图片后直接保存到本地记录里；这样可以先把图文记录体验做通，但如果后续继续扩大图片规模，仍建议尽快推进更适合附件的存储方案。"
     },
     {
+      "id": "F042",
+      "title": "心记首页天气卡",
+      "status": "done",
+      "priority": 12,
+      "phase": "M2-local-journal",
+      "summary": "在心记首页头部新增紧凑天气提示，使用免费天气 API 获取数据，并通过原生 SF Symbols 渲染图标。",
+      "dependsOn": [
+        "F013"
+      ],
+      "acceptanceCriteria": [
+        "仅在心记首页头部显示天气卡，不影响其他 Park 的顶部布局。",
+        "数据层使用免费天气 API，首版不要求用户配置 API Key。",
+        "卡片显示当前温度、天气概况和最高最低温，以紧凑条状组件呈现。",
+        "卡片视觉采用渐变背景和轻玻璃质感，但尺寸保持克制，不直接复制 Apple 专有资源。",
+        "iOS 端天气图标通过 Capacitor 桥接调用原生 SF Symbols 渲染。",
+        "定位失败时会回退到最近一次位置或默认城市，避免首页完全空白。"
+      ],
+      "verification": [
+        "npm run build",
+        "npx cap sync ios"
+      ],
+      "notes": "已完成。当前版本选用无需 API Key 的 Open-Meteo 作为天气数据源；前端用 Vue + CSS 绘制紧凑天气 badge，iOS 通过自定义 WeatherSymbols 插件把 SF Symbols 渲染成位图供 WebView 使用。"
+    },
+    {
       "id": "F025",
       "title": "多类型资料检索与 Agent 读取",
       "status": "planned",

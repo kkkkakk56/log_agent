@@ -7,6 +7,7 @@ import {
   ref,
   type CSSProperties,
 } from 'vue';
+import JournalWeatherHeroCard from './components/JournalWeatherHeroCard.vue';
 import type { CalendarDay } from './utils/date';
 import type { RecordBranch } from './types/branch';
 import type { JournalEntry } from './types/journal';
@@ -28,6 +29,11 @@ import {
 } from './services/agentClient';
 import { getJournalRagIndexStatus } from './services/journalRagSearch';
 import { buildRecordAgentContextTool } from './services/recordAgentTool';
+import {
+  fetchWeatherSnapshot,
+  resolveWeatherLocation,
+  type WeatherSnapshot,
+} from './services/weatherService';
 import {
   appendAgentConversationMessage,
   createAgentConversation,
@@ -210,8 +216,6 @@ interface ParkSummary {
   label: string;
   title: string;
   description: string;
-  metricValue: string;
-  metricLabel: string;
 }
 
 interface ReminderTargetDraft {
@@ -273,6 +277,7 @@ const BRANCH_UNGROUPED_VALUE = '__ungrouped__';
 const SEARCH_KEYWORD_SPLIT_PATTERN = /[\s,，、/／]+/;
 const SEARCH_EXCERPT_CONTEXT_LENGTH = 56;
 const SEARCH_EXCERPT_FALLBACK_LENGTH = 120;
+const WEATHER_REFRESH_INTERVAL = 30 * 60 * 1000;
 
 const labRecordTypeOptions: Array<{
   value: LabRecordType;
@@ -323,6 +328,10 @@ const vaultEntries = ref<VaultEntry[]>([]);
 const vaultSession = ref<VaultSession | null>(null);
 const activePark = ref<ActivePark>('journal');
 const activeView = ref<ActiveView>('timeline');
+const journalWeatherSnapshot = ref<WeatherSnapshot | null>(null);
+const journalWeatherLoading = ref(false);
+const journalWeatherStatusMessage = ref('Open-Meteo · 正在获取天气');
+const journalWeatherLastLoadedAt = ref<number | null>(null);
 const draftTitle = ref('');
 const draftContent = ref('');
 const draftEntryDate = ref(getLocalDateKey(new Date()));
@@ -500,16 +509,6 @@ const entryCountByDate = computed(() => {
 
   return counts;
 });
-
-const todayCount = computed(() => {
-  const today = getLocalDateKey(new Date());
-
-  return entryCountByDate.value.get(today) ?? 0;
-});
-
-const openTodoCount = computed(
-  () => todos.value.filter((todo) => todo.status === 'open').length,
-);
 
 const activeKnowledgeBase = computed(
   () =>
@@ -947,32 +946,24 @@ const parkSummaries = computed<ParkSummary[]>(() => [
     label: '心记',
     title: '心记',
     description: formatTodayHeader(),
-    metricValue: String(todayCount.value),
-    metricLabel: '今日',
   },
   {
     id: 'knowledge',
     label: '笔记',
     title: '笔记',
     description: '学习库和知识记录会放在这里，不混入日记时间线。',
-    metricValue: String(knowledgeBases.value.length),
-    metricLabel: '知识库',
   },
   {
     id: 'lab',
     label: '做记',
     title: '做记',
     description: '项目操作和阶段复盘会按项目沉淀在这里。',
-    metricValue: String(labProjects.value.length),
-    metricLabel: '项目',
   },
   {
     id: 'todo',
     label: '✓ 待办',
     title: '我的待办',
     description: '从心记和做记里自然长出的行动项。',
-    metricValue: String(openTodoCount.value),
-    metricLabel: '待办',
   },
   {
     id: 'vault',
@@ -983,8 +974,6 @@ const parkSummaries = computed<ParkSummary[]>(() => [
         ? '本地加密保存账号与密码；离开后会自动重新上锁。'
         : '本地加密保存账号与密码；进入前需要先解锁。'
       : '先设置一个解锁密码，再把项目账号和密码收进来。',
-    metricValue: String(vaultEntryCount.value),
-    metricLabel: '凭据',
   },
 ]);
 
@@ -993,6 +982,16 @@ const activeParkSummary = computed(
     parkSummaries.value.find((park) => park.id === activePark.value) ??
     parkSummaries.value[0],
 );
+const journalWeatherMetaText = computed(() => {
+  if (journalWeatherSnapshot.value && !journalWeatherStatusMessage.value) {
+    return [
+      journalWeatherSnapshot.value.locationSourceLabel,
+      journalWeatherSnapshot.value.updatedLabel,
+    ].join(' · ');
+  }
+
+  return journalWeatherStatusMessage.value;
+});
 
 const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(
@@ -1563,6 +1562,95 @@ async function submitVaultUnlock() {
 function handleDocumentVisibilityChange() {
   if (document.hidden && isVaultUnlocked.value) {
     lockVault('密库已自动上锁。');
+  }
+
+  if (!document.hidden && shouldRefreshJournalWeather()) {
+    void refreshJournalWeather({ background: true });
+  }
+}
+
+function shouldRefreshJournalWeather(): boolean {
+  return (
+    journalWeatherLastLoadedAt.value === null ||
+    Date.now() - journalWeatherLastLoadedAt.value >= WEATHER_REFRESH_INTERVAL
+  );
+}
+
+function clearWeatherRefreshTimer() {
+  if (weatherRefreshTimer !== null) {
+    window.clearInterval(weatherRefreshTimer);
+    weatherRefreshTimer = null;
+  }
+}
+
+function scheduleWeatherRefresh() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  clearWeatherRefreshTimer();
+  weatherRefreshTimer = window.setInterval(() => {
+    if (!document.hidden) {
+      void refreshJournalWeather({ background: true });
+    }
+  }, WEATHER_REFRESH_INTERVAL);
+}
+
+async function refreshJournalWeather(options: { background?: boolean } = {}) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const shouldShowSpinner =
+    journalWeatherSnapshot.value === null || options.background !== true;
+
+  if (shouldShowSpinner) {
+    journalWeatherLoading.value = true;
+  }
+
+  if (journalWeatherSnapshot.value === null) {
+    journalWeatherStatusMessage.value = 'Open-Meteo · 正在获取天气';
+  }
+
+  weatherAbortController?.abort();
+  const controller = new AbortController();
+  weatherAbortController = controller;
+
+  try {
+    const location = await resolveWeatherLocation();
+
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    const snapshot = await fetchWeatherSnapshot(location, controller.signal);
+
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    journalWeatherSnapshot.value = snapshot;
+    journalWeatherStatusMessage.value = '';
+    journalWeatherLastLoadedAt.value = Date.now();
+  } catch (error) {
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    const fallbackMessage =
+      error instanceof Error && error.message
+        ? error.message
+        : '天气暂时不可用，请稍后重试。';
+
+    journalWeatherStatusMessage.value = journalWeatherSnapshot.value
+      ? `${journalWeatherSnapshot.value.locationSourceLabel} · 展示最近一次天气`
+      : fallbackMessage;
+  } finally {
+    if (weatherAbortController === controller) {
+      weatherAbortController = null;
+    }
+
+    journalWeatherLoading.value = false;
   }
 }
 
@@ -5195,6 +5283,8 @@ async function submitAgentMessage() {
 }
 
 let removeReminderNotificationActionListener: (() => void) | null = null;
+let weatherRefreshTimer: number | null = null;
+let weatherAbortController: AbortController | null = null;
 
 onMounted(() => {
   document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
@@ -5205,6 +5295,8 @@ onMounted(() => {
   window.addEventListener('resize', handleCardActionMenuViewportChange);
   window.addEventListener('resize', handleAgentViewportResize);
   void nextTick(initializeAgentFabPosition);
+  void refreshJournalWeather();
+  scheduleWeatherRefresh();
   void syncDailyJournalReminderOnLaunch();
   void listenForReminderNotificationActions((action) => {
     if (action.kind === 'daily-journal-reminder') {
@@ -5230,6 +5322,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleAgentViewportResize);
   removeReminderNotificationActionListener?.();
   removeReminderNotificationActionListener = null;
+  weatherAbortController?.abort();
+  weatherAbortController = null;
+  clearWeatherRefreshTimer();
   clearTodoCompletionTimer();
 });
 </script>
@@ -5294,20 +5389,23 @@ onBeforeUnmount(() => {
 
         <template v-else>
           <div class="hero-content-row">
-            <div>
-              <h1 id="app-title">{{ activeParkSummary.title }}</h1>
-              <p class="today-line">{{ activeParkSummary.description }}</p>
-            </div>
+            <div class="hero-content-stack">
+              <div class="hero-headline-row">
+                <div class="hero-title-block">
+                <h1 id="app-title">{{ activeParkSummary.title }}</h1>
+                </div>
 
-            <div
-              v-if="activePark === 'journal'"
-              class="header-actions"
-              aria-label="快捷操作"
-            >
-              <div class="today-pill">
-                <span>{{ activeParkSummary.metricValue }}</span>
-                <small>{{ activeParkSummary.metricLabel }}</small>
+                <JournalWeatherHeroCard
+                  v-if="activePark === 'journal'"
+                  class="hero-weather-inline"
+                  :snapshot="journalWeatherSnapshot"
+                  :loading="journalWeatherLoading"
+                  :meta-text="journalWeatherMetaText"
+                  @retry="refreshJournalWeather"
+                />
               </div>
+
+              <p class="today-line">{{ activeParkSummary.description }}</p>
             </div>
           </div>
         </template>
