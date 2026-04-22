@@ -47,3 +47,110 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
 }
+
+@objc(AppViewController)
+class AppViewController: CAPBridgeViewController {
+    override open func capacitorDidLoad() {
+        bridge?.registerPluginInstance(WeatherSymbolsPlugin())
+    }
+}
+
+@objc(WeatherSymbolsPlugin)
+class WeatherSymbolsPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "WeatherSymbolsPlugin"
+    public let jsName = "WeatherSymbols"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "renderSymbol", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func renderSymbol(_ call: CAPPluginCall) {
+        guard let name = call.getString("name"), !name.isEmpty else {
+            call.reject("Weather symbol name is required.")
+            return
+        }
+
+        let pointSize = CGFloat(call.getDouble("pointSize") ?? 48)
+        let weight = symbolWeight(from: call.getString("weight"))
+        let scale = symbolScale(from: call.getString("scale"))
+        let tintColor = color(from: call.getString("tintColor") ?? "#FFFFFF")
+        let configuration = UIImage.SymbolConfiguration(
+            pointSize: pointSize,
+            weight: weight,
+            scale: scale
+        )
+
+        guard let baseImage = UIImage(systemName: name, withConfiguration: configuration) else {
+            call.reject("Unable to load SF Symbol \(name).")
+            return
+        }
+
+        let tintedImage = baseImage.withTintColor(tintColor, renderingMode: .alwaysOriginal)
+
+        guard let imageData = tintedImage.pngData() else {
+            call.reject("Unable to render SF Symbol \(name).")
+            return
+        }
+
+        call.resolve([
+            "dataUrl": "data:image/png;base64,\(imageData.base64EncodedString())"
+        ])
+    }
+
+    private func symbolWeight(from rawValue: String?) -> UIImage.SymbolWeight {
+        switch rawValue {
+        case "ultraLight":
+            return .ultraLight
+        case "thin":
+            return .thin
+        case "light":
+            return .light
+        case "medium":
+            return .medium
+        case "semibold":
+            return .semibold
+        case "bold":
+            return .bold
+        default:
+            return .regular
+        }
+    }
+
+    private func symbolScale(from rawValue: String?) -> UIImage.SymbolScale {
+        switch rawValue {
+        case "small":
+            return .small
+        case "large":
+            return .large
+        default:
+            return .medium
+        }
+    }
+
+    private func color(from hex: String) -> UIColor {
+        let normalizedHex = hex
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+
+        var hexNumber: UInt64 = 0
+        Scanner(string: normalizedHex).scanHexInt64(&hexNumber)
+
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let alpha: CGFloat
+
+        if normalizedHex.count == 8 {
+            red = CGFloat((hexNumber & 0xFF000000) >> 24) / 255
+            green = CGFloat((hexNumber & 0x00FF0000) >> 16) / 255
+            blue = CGFloat((hexNumber & 0x0000FF00) >> 8) / 255
+            alpha = CGFloat(hexNumber & 0x000000FF) / 255
+        } else {
+            red = CGFloat((hexNumber & 0xFF0000) >> 16) / 255
+            green = CGFloat((hexNumber & 0x00FF00) >> 8) / 255
+            blue = CGFloat(hexNumber & 0x0000FF) / 255
+            alpha = 1
+        }
+
+        return UIColor(red: red, green: green, blue: blue, alpha: alpha)
+    }
+}
