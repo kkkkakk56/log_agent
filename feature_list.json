@@ -834,6 +834,28 @@
       "notes": "已完成。第一版采用本地优先方案，导入后会在客户端压缩为适合本地存储的尺寸，再跟随心记、知识笔记和做记记录一起保存；目前每条记录最多 4 张图片。验证通过：npm run build，npx cap sync ios。"
     },
     {
+      "id": "TASK-040",
+      "featureId": "F043",
+      "category": "feature",
+      "description": "思记 Park：新增轻量问题花园，用“问题 -> 回响”组织持续性值得思考的问题",
+      "status": "done",
+      "priority": 11,
+      "dependsOn": [
+        "F021"
+      ],
+      "steps": [
+        "顶层导航新增独立的思记 Park",
+        "思记首页以问题列表为主体，展示问题、最近回响、回响数量和最近更新时间",
+        "用户可以通过底部中间 + 新增问题",
+        "点进问题后按时间展示回响流",
+        "问题详情页底部中间 + 用于追加回响",
+        "问题和回响都保存在本地，刷新或重启后不丢失"
+      ],
+      "passes": true,
+      "verify_cmd": "cd journal-agent && npm run build",
+      "notes": "已完成。第一版采用轻量的“问题 -> 回响”结构，不引入标签、状态、分类或复杂管理；问题列表和回响流都走本地存储。验证通过：npm run build。"
+    },
+    {
       "id": "TASK-021",
       "featureId": "F025",
       "category": "feature",
@@ -1766,6 +1788,29 @@
         "npx cap sync ios"
       ],
       "notes": "已完成。当前版本选用无需 API Key 的 Open-Meteo 作为天气数据源；前端用 Vue + CSS 绘制紧凑天气 badge，iOS 通过自定义 WeatherSymbols 插件把 SF Symbols 渲染成位图供 WebView 使用。"
+    },
+    {
+      "id": "F043",
+      "title": "思记 Park",
+      "status": "done",
+      "priority": 11,
+      "phase": "M3-record-hub",
+      "summary": "新增一个轻量、安静的思记 Park，用“问题 -> 回响”组织持续性值得思考的问题。",
+      "dependsOn": [
+        "F021"
+      ],
+      "acceptanceCriteria": [
+        "顶层导航出现独立的思记 Park。",
+        "思记首页只展示问题列表，每个问题显示问题本身、最近回响摘要、回响数量和最近更新时间。",
+        "用户可以通过底部中间 + 新增问题，只需要填写问题本身，为什么值得想为可选。",
+        "点进问题后进入回响流，按时间展示这个问题下的思考片段。",
+        "问题详情页的底部中间 + 用来追加回响。",
+        "问题和回响都本地持久化保存，刷新或重启后仍能看到。"
+      ],
+      "verification": [
+        "npm run build"
+      ],
+      "notes": "已完成。第一版刻意保持低压和轻量，只保留问题与回响，不加入标签、状态、分类或复杂操作。"
     },
     {
       "id": "F025",

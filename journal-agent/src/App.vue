@@ -16,6 +16,7 @@ import type { LabProject, LabRecord, LabRecordType } from './types/lab';
 import type { RecordImageAttachment } from './types/media';
 import type { DailyJournalReminderSettings } from './types/dailyReminder';
 import type { RecordReminder, ReminderTargetType } from './types/reminder';
+import type { ThoughtEcho, ThoughtQuestion } from './types/thought';
 import type { TodoMark, TodoParkType, TodoTargetType } from './types/todo';
 import type { VaultEntry } from './types/vault';
 import {
@@ -83,6 +84,12 @@ import {
   updateEntry,
 } from './storage/journalStore';
 import {
+  createThoughtEcho,
+  createThoughtQuestion,
+  getThoughtEchoes,
+  getThoughtQuestions,
+} from './storage/thoughtStore';
+import {
   archiveRecordBranch,
   createRecordBranch,
   deleteRecordBranch,
@@ -149,7 +156,7 @@ import {
 } from './utils/branchTree';
 import { MAX_RECORD_IMAGES, importRecordImages } from './utils/recordImages';
 
-type ActivePark = 'journal' | 'knowledge' | 'lab' | 'todo' | 'vault' | 'plan';
+type ActivePark = 'journal' | 'knowledge' | 'lab' | 'thought' | 'todo' | 'vault' | 'plan';
 type ActiveView = 'timeline' | 'search' | 'calendar';
 type TodoParkFilter = 'all' | TodoParkType;
 type TodoQuickFilter = 'all' | 'reminder' | 'today';
@@ -319,6 +326,8 @@ const knowledgeBases = ref<KnowledgeBase[]>(getKnowledgeBases());
 const knowledgeNotes = ref<KnowledgeNote[]>(getKnowledgeNotes());
 const labProjects = ref<LabProject[]>(getLabProjects());
 const labRecords = ref<LabRecord[]>(getLabRecords());
+const thoughtQuestions = ref<ThoughtQuestion[]>(getThoughtQuestions());
+const thoughtEchoes = ref<ThoughtEcho[]>(getThoughtEchoes());
 const recordBranches = ref<RecordBranch[]>(getRecordBranches({ includeArchived: true }));
 const reminders = ref<RecordReminder[]>(getActiveReminders());
 const dailyJournalReminder = ref<DailyJournalReminderSettings>(
@@ -393,6 +402,12 @@ const newLabRecordType = ref<LabRecordType>('operation');
 const newLabRecordTags = ref('');
 const newLabRecordBranchValue = ref(BRANCH_UNGROUPED_VALUE);
 const newLabRecordImages = ref<RecordImageAttachment[]>([]);
+const selectedThoughtQuestionId = ref<string | null>(null);
+const thoughtQuestionComposerOpen = ref(false);
+const thoughtEchoComposerOpen = ref(false);
+const newThoughtQuestionTitle = ref('');
+const newThoughtQuestionNote = ref('');
+const newThoughtEchoContent = ref('');
 const editingLabRecordId = ref<string | null>(null);
 const editingLabRecordTitle = ref('');
 const editingLabRecordContent = ref('');
@@ -715,6 +730,48 @@ const showLabInspector = computed(() => {
   );
 });
 
+const selectedThoughtQuestion = computed(
+  () =>
+    thoughtQuestions.value.find(
+      (question) => question.id === selectedThoughtQuestionId.value,
+    ) ?? null,
+);
+
+const selectedThoughtEchoes = computed(() => {
+  const questionId = selectedThoughtQuestion.value?.id;
+
+  if (!questionId) {
+    return [];
+  }
+
+  return thoughtEchoes.value
+    .filter((echo) => echo.questionId === questionId && echo.deletedAt === null)
+    .sort(
+      (firstEcho, secondEcho) =>
+        new Date(firstEcho.createdAt).getTime() -
+        new Date(secondEcho.createdAt).getTime(),
+    );
+});
+
+const thoughtQuestionSummaries = computed(() =>
+  thoughtQuestions.value.map((question) => {
+    const echoes = thoughtEchoes.value.filter(
+      (echo) => echo.questionId === question.id && echo.deletedAt === null,
+    );
+    const latestEcho = [...echoes].sort(
+      (firstEcho, secondEcho) =>
+        new Date(secondEcho.createdAt).getTime() -
+        new Date(firstEcho.createdAt).getTime(),
+    )[0] ?? null;
+
+    return {
+      question,
+      latestEcho,
+      echoCount: echoes.length,
+    };
+  }),
+);
+
 const resolvedCardActionMenuTarget = computed<ResolvedCardActionMenuTarget | null>(() => {
   const activeTarget = cardActionMenuTarget.value;
 
@@ -919,6 +976,14 @@ const canCreateLabRecord = computed(
 const canSaveLabRecord = computed(
   () => Boolean(editingLabRecordId.value) && editingLabRecordContent.value.trim().length > 0,
 );
+const canCreateThoughtQuestion = computed(
+  () => newThoughtQuestionTitle.value.trim().length > 0,
+);
+const canCreateThoughtEcho = computed(
+  () =>
+    Boolean(selectedThoughtQuestion.value) &&
+    newThoughtEchoContent.value.trim().length > 0,
+);
 const isVaultUnlocked = computed(() => vaultSession.value !== null);
 const vaultEntryCount = computed(() => vaultEntries.value.length);
 const vaultLockStatusLabel = computed(() => {
@@ -963,6 +1028,12 @@ const parkSummaries = computed<ParkSummary[]>(() => [
     label: '做记',
     title: '做记',
     description: '项目操作和阶段复盘会按项目沉淀在这里。',
+  },
+  {
+    id: 'thought',
+    label: '思记',
+    title: '思记',
+    description: '放一些还没有答案，但值得反复遇见的问题。',
   },
   {
     id: 'todo',
@@ -4665,6 +4736,109 @@ function selectLabRecord(record: LabRecord) {
   cancelLabRecordEditing();
 }
 
+function resetNewThoughtQuestionForm() {
+  newThoughtQuestionTitle.value = '';
+  newThoughtQuestionNote.value = '';
+}
+
+function resetNewThoughtEchoForm() {
+  newThoughtEchoContent.value = '';
+}
+
+function selectThoughtQuestion(question: ThoughtQuestion) {
+  selectedThoughtQuestionId.value = question.id;
+  resetNewThoughtEchoForm();
+}
+
+function leaveThoughtQuestion() {
+  selectedThoughtQuestionId.value = null;
+  thoughtEchoComposerOpen.value = false;
+  resetNewThoughtEchoForm();
+}
+
+function openThoughtQuestionComposer() {
+  resetNewThoughtQuestionForm();
+  thoughtQuestionComposerOpen.value = true;
+  void nextTick(() => {
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLInputElement>('.thought-question-compose-sheet .title-input')
+        ?.focus();
+    }, 120);
+  });
+}
+
+function closeThoughtQuestionComposer() {
+  thoughtQuestionComposerOpen.value = false;
+  resetNewThoughtQuestionForm();
+}
+
+function openThoughtEchoComposer() {
+  if (!selectedThoughtQuestion.value) {
+    return;
+  }
+
+  resetNewThoughtEchoForm();
+  thoughtEchoComposerOpen.value = true;
+  void nextTick(() => {
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLTextAreaElement>('.thought-echo-compose-sheet .journal-input')
+        ?.focus();
+    }, 120);
+  });
+}
+
+function closeThoughtEchoComposer() {
+  thoughtEchoComposerOpen.value = false;
+  resetNewThoughtEchoForm();
+}
+
+function handleThoughtFabClick() {
+  if (selectedThoughtQuestion.value) {
+    openThoughtEchoComposer();
+    return;
+  }
+
+  openThoughtQuestionComposer();
+}
+
+function saveNewThoughtQuestion() {
+  const question = createThoughtQuestion(
+    newThoughtQuestionTitle.value,
+    newThoughtQuestionNote.value,
+  );
+
+  if (!question) {
+    window.alert('问题保存失败，请先写下一个问题。');
+    return;
+  }
+
+  selectedThoughtQuestionId.value = question.id;
+  thoughtQuestionComposerOpen.value = false;
+  resetNewThoughtQuestionForm();
+  refreshThoughtData();
+}
+
+function saveNewThoughtEcho() {
+  const question = selectedThoughtQuestion.value;
+
+  if (!question) {
+    return;
+  }
+
+  const echo = createThoughtEcho(question.id, newThoughtEchoContent.value);
+
+  if (!echo) {
+    window.alert('回响保存失败，请先写下一点内容。');
+    return;
+  }
+
+  thoughtEchoComposerOpen.value = false;
+  resetNewThoughtEchoForm();
+  refreshThoughtData();
+}
+
 function isLabRecordExpanded(recordId: string): boolean {
   return (
     selectedLabRecordId.value === recordId &&
@@ -4914,6 +5088,20 @@ function runCardAction(actionId: CardActionId) {
   }
 }
 
+function refreshThoughtData() {
+  thoughtQuestions.value = getThoughtQuestions();
+  thoughtEchoes.value = getThoughtEchoes();
+
+  if (
+    selectedThoughtQuestionId.value &&
+    !thoughtQuestions.value.some(
+      (question) => question.id === selectedThoughtQuestionId.value,
+    )
+  ) {
+    selectedThoughtQuestionId.value = null;
+  }
+}
+
 function refreshAgentConversations() {
   agentConversations.value = getAgentConversations();
 
@@ -4956,6 +5144,11 @@ function setActivePark(park: ActivePark) {
   if (park !== 'lab') {
     labRecordComposerOpen.value = false;
     labDrawerOpen.value = false;
+  }
+
+  if (park !== 'thought') {
+    thoughtQuestionComposerOpen.value = false;
+    thoughtEchoComposerOpen.value = false;
   }
 
   if (park === 'knowledge' && activeKnowledgeBase.value && !selectedKnowledgeNote.value) {
@@ -6467,6 +6660,73 @@ onBeforeUnmount(() => {
           </button>
         </section>
       </div>
+    </section>
+
+    <section
+      v-else-if="activePark === 'thought'"
+      class="thought-workspace"
+      aria-label="思记"
+    >
+      <template v-if="!selectedThoughtQuestion">
+        <div v-if="thoughtQuestions.length === 0" class="thought-empty">
+          <p>还没有问题。</p>
+          <span>先放下一个还没有答案，但值得反复遇见的问题。</span>
+        </div>
+
+        <div v-else class="thought-question-list">
+          <button
+            v-for="item in thoughtQuestionSummaries"
+            :key="item.question.id"
+            class="thought-question-card"
+            type="button"
+            @click="selectThoughtQuestion(item.question)"
+          >
+            <strong>{{ item.question.title }}</strong>
+            <p v-if="item.latestEcho">{{ item.latestEcho.content }}</p>
+            <p v-else-if="item.question.note">{{ item.question.note }}</p>
+            <span>
+              {{ item.echoCount }} 个回响 · {{ getDateGroupLabel(item.question.updatedAt) }}
+            </span>
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
+        <section class="thought-detail" aria-labelledby="thought-detail-title">
+          <button class="thought-back-button" type="button" @click="leaveThoughtQuestion">
+            返回
+          </button>
+          <header class="thought-detail-header">
+            <h2 id="thought-detail-title">{{ selectedThoughtQuestion.title }}</h2>
+            <p v-if="selectedThoughtQuestion.note">{{ selectedThoughtQuestion.note }}</p>
+          </header>
+
+          <div v-if="selectedThoughtEchoes.length === 0" class="thought-empty compact">
+            <p>还没有回响。</p>
+            <span>等它下一次冒出来时，再轻轻补上一句。</span>
+          </div>
+
+          <div v-else class="thought-echo-list">
+            <article
+              v-for="echo in selectedThoughtEchoes"
+              :key="echo.id"
+              class="thought-echo-card"
+            >
+              <p>{{ echo.content }}</p>
+              <span>{{ getDateGroupLabel(echo.createdAt) }} · {{ formatEntryTime(echo.createdAt) }}</span>
+            </article>
+          </div>
+        </section>
+      </template>
+
+      <button
+        class="journal-compose-fab"
+        type="button"
+        :aria-label="selectedThoughtQuestion ? '添加回响' : '添加问题'"
+        @click="handleThoughtFabClick"
+      >
+        +
+      </button>
     </section>
 
     <section
@@ -9155,6 +9415,104 @@ onBeforeUnmount(() => {
             @click="saveNewLabRecord"
           >
             保存记录
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="thoughtQuestionComposerOpen"
+      class="journal-compose-backdrop"
+      role="presentation"
+      @click.self="closeThoughtQuestionComposer"
+    >
+      <section class="compose-card journal-compose-sheet thought-question-compose-sheet" aria-labelledby="thought-question-compose-title">
+        <div class="journal-compose-header">
+          <div>
+            <p class="eyebrow">新问题</p>
+            <h2 id="thought-question-compose-title" class="journal-section-title">放下一个问题</h2>
+          </div>
+          <button
+            class="journal-compose-close"
+            type="button"
+            aria-label="关闭新增问题"
+            @click="closeThoughtQuestionComposer"
+          >
+            ×
+          </button>
+        </div>
+
+        <input
+          v-model="newThoughtQuestionTitle"
+          class="title-input"
+          type="text"
+          maxlength="120"
+          placeholder="这个问题是什么？"
+          aria-label="思记问题"
+        />
+        <textarea
+          v-model="newThoughtQuestionNote"
+          class="journal-input thought-note-input"
+          placeholder="为什么它值得想？可选"
+          rows="4"
+        />
+        <div class="entry-actions">
+          <button class="ghost-action" type="button" @click="closeThoughtQuestionComposer">
+            取消
+          </button>
+          <button
+            class="primary-action small"
+            type="button"
+            :disabled="!canCreateThoughtQuestion"
+            @click="saveNewThoughtQuestion"
+          >
+            保存问题
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="thoughtEchoComposerOpen && selectedThoughtQuestion"
+      class="journal-compose-backdrop"
+      role="presentation"
+      @click.self="closeThoughtEchoComposer"
+    >
+      <section class="compose-card journal-compose-sheet thought-echo-compose-sheet" aria-labelledby="thought-echo-compose-title">
+        <div class="journal-compose-header">
+          <div>
+            <p class="eyebrow">新回响</p>
+            <h2 id="thought-echo-compose-title" class="journal-section-title">
+              {{ selectedThoughtQuestion.title }}
+            </h2>
+          </div>
+          <button
+            class="journal-compose-close"
+            type="button"
+            aria-label="关闭新增回响"
+            @click="closeThoughtEchoComposer"
+          >
+            ×
+          </button>
+        </div>
+
+        <textarea
+          v-model="newThoughtEchoContent"
+          class="journal-input"
+          placeholder="今天想到什么？"
+          rows="7"
+        />
+        <div class="entry-actions">
+          <button class="ghost-action" type="button" @click="closeThoughtEchoComposer">
+            取消
+          </button>
+          <button
+            class="primary-action small"
+            type="button"
+            :disabled="!canCreateThoughtEcho"
+            @click="saveNewThoughtEcho"
+          >
+            保存回响
           </button>
         </div>
       </section>
