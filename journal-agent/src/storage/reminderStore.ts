@@ -29,22 +29,46 @@ const isReminderTargetType = (value: unknown): value is ReminderTargetType =>
   value === 'knowledge-note' ||
   value === 'lab-record';
 
-const isRecordReminder = (value: unknown): value is RecordReminder =>
-  isRecord(value) &&
-  typeof value.id === 'string' &&
-  typeof value.notificationId === 'number' &&
-  Number.isInteger(value.notificationId) &&
-  isReminderTargetType(value.targetType) &&
-  typeof value.targetId === 'string' &&
-  (typeof value.parentId === 'string' || value.parentId === null) &&
-  typeof value.targetTitle === 'string' &&
-  typeof value.reminderTitle === 'string' &&
-  typeof value.quote === 'string' &&
-  (typeof value.anchorStart === 'number' || value.anchorStart === null) &&
-  typeof value.scheduledAt === 'string' &&
-  typeof value.createdAt === 'string' &&
-  typeof value.updatedAt === 'string' &&
-  (typeof value.canceledAt === 'string' || value.canceledAt === null);
+const normalizeReminder = (value: unknown): RecordReminder | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.notificationId !== 'number' ||
+    !Number.isInteger(value.notificationId) ||
+    !isReminderTargetType(value.targetType) ||
+    typeof value.targetId !== 'string' ||
+    !(typeof value.parentId === 'string' || value.parentId === null) ||
+    typeof value.targetTitle !== 'string' ||
+    typeof value.reminderTitle !== 'string' ||
+    typeof value.quote !== 'string' ||
+    !(typeof value.anchorStart === 'number' || value.anchorStart === null) ||
+    typeof value.scheduledAt !== 'string' ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    !(typeof value.canceledAt === 'string' || value.canceledAt === null)
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    notificationId: value.notificationId,
+    targetType: value.targetType,
+    targetId: value.targetId,
+    parentId: value.parentId,
+    targetTitle: value.targetTitle,
+    reminderTitle: value.reminderTitle,
+    quote: value.quote,
+    anchorStart: value.anchorStart,
+    scheduledAt: value.scheduledAt,
+    deliveredAt: typeof value.deliveredAt === 'string' ? value.deliveredAt : null,
+    acknowledgedAt:
+      typeof value.acknowledgedAt === 'string' ? value.acknowledgedAt : null,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    canceledAt: value.canceledAt,
+  };
+};
 
 const readReminders = (): RecordReminder[] => {
   try {
@@ -60,7 +84,9 @@ const readReminders = (): RecordReminder[] => {
       return [];
     }
 
-    return parsedItems.filter(isRecordReminder);
+    return parsedItems
+      .map(normalizeReminder)
+      .filter((reminder): reminder is RecordReminder => reminder !== null);
   } catch {
     return [];
   }
@@ -172,6 +198,8 @@ export const createReminder = (
         ? fields.anchorStart
         : null,
     scheduledAt: scheduledAt.toISOString(),
+    deliveredAt: null,
+    acknowledgedAt: null,
     createdAt: now,
     updatedAt: now,
     canceledAt: null,
@@ -211,6 +239,8 @@ export const updateReminder = (
         ? fields.anchorStart
         : null,
     scheduledAt: scheduledAt.toISOString(),
+    deliveredAt: null,
+    acknowledgedAt: null,
     updatedAt: new Date().toISOString(),
   };
   const nextReminders = [...reminders];
@@ -239,6 +269,65 @@ export const cancelReminder = (id: string): RecordReminder | null => {
   nextReminders[reminderIndex] = canceledReminder;
 
   return writeReminders(nextReminders) ? canceledReminder : null;
+};
+
+export const markDueRemindersDelivered = (): RecordReminder[] => {
+  const reminders = readReminders();
+  const nowTime = Date.now();
+  const now = new Date(nowTime).toISOString();
+  const deliveredReminders: RecordReminder[] = [];
+  const nextReminders = reminders.map((reminder) => {
+    if (
+      reminder.canceledAt !== null ||
+      reminder.acknowledgedAt !== null ||
+      reminder.deliveredAt !== null
+    ) {
+      return reminder;
+    }
+
+    const scheduledAt = new Date(reminder.scheduledAt).getTime();
+    if (Number.isNaN(scheduledAt) || scheduledAt > nowTime) {
+      return reminder;
+    }
+
+    const deliveredReminder: RecordReminder = {
+      ...reminder,
+      deliveredAt: now,
+      updatedAt: now,
+    };
+    deliveredReminders.push(deliveredReminder);
+
+    return deliveredReminder;
+  });
+
+  if (deliveredReminders.length > 0) {
+    writeReminders(nextReminders);
+  }
+
+  return deliveredReminders;
+};
+
+export const acknowledgeReminder = (id: string): RecordReminder | null => {
+  const reminders = readReminders();
+  const reminderIndex = reminders.findIndex(
+    (reminder) => reminder.id === id && reminder.canceledAt === null,
+  );
+
+  if (reminderIndex === -1) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const acknowledgedReminder: RecordReminder = {
+    ...reminders[reminderIndex],
+    deliveredAt: reminders[reminderIndex].deliveredAt ?? now,
+    acknowledgedAt: now,
+    updatedAt: now,
+  };
+  const nextReminders = [...reminders];
+  nextReminders[reminderIndex] = acknowledgedReminder;
+
+  return writeReminders(nextReminders) ? acknowledgedReminder : null;
 };
 
 export const cancelRemindersForTarget = (

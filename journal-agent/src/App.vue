@@ -43,11 +43,13 @@ import {
   type AgentConversation,
 } from './storage/agentConversationStore';
 import {
+  acknowledgeReminder,
   cancelRemindersForTarget,
   createReminder,
   getActiveReminders,
   getUpcomingActiveReminders,
   getReminderById,
+  markDueRemindersDelivered,
   updateReminder,
 } from './storage/reminderStore';
 import {
@@ -155,14 +157,12 @@ type KnowledgeInspectorMode =
   | 'base'
   | 'base-edit'
   | 'note-view'
-  | 'note-edit'
-  | 'note-create';
+  | 'note-edit';
 type LabInspectorMode =
   | 'project'
   | 'project-edit'
   | 'record-view'
-  | 'record-edit'
-  | 'record-create';
+  | 'record-edit';
 type BranchFilterId = 'all' | 'ungrouped' | string;
 type CardActionId = 'flag' | 'pin' | 'todo' | 'reminder' | 'edit' | 'delete';
 type ImageImportTarget =
@@ -280,6 +280,7 @@ const SEARCH_KEYWORD_SPLIT_PATTERN = /[\s,，、/／]+/;
 const SEARCH_EXCERPT_CONTEXT_LENGTH = 56;
 const SEARCH_EXCERPT_FALLBACK_LENGTH = 120;
 const WEATHER_REFRESH_INTERVAL = 30 * 60 * 1000;
+const REMINDER_INBOX_POLL_INTERVAL = 30 * 1000;
 
 const labRecordTypeOptions: Array<{
   value: LabRecordType;
@@ -357,6 +358,7 @@ const activeKnowledgeBranchFilterId = ref<BranchFilterId>('all');
 const knowledgeBranchPanelOpen = ref(false);
 const knowledgeArchivedBranchesOpen = ref(false);
 const knowledgeInspectorMode = ref<KnowledgeInspectorMode>('base');
+const knowledgeNoteComposerOpen = ref(false);
 const newKnowledgeNoteTitle = ref('');
 const newKnowledgeNoteContent = ref('');
 const newKnowledgeNoteSourceUrl = ref('');
@@ -384,6 +386,7 @@ const activeLabBranchFilterId = ref<BranchFilterId>('all');
 const labBranchPanelOpen = ref(false);
 const labArchivedBranchesOpen = ref(false);
 const labInspectorMode = ref<LabInspectorMode>('project');
+const labRecordComposerOpen = ref(false);
 const newLabRecordTitle = ref('');
 const newLabRecordContent = ref('');
 const newLabRecordType = ref<LabRecordType>('operation');
@@ -435,6 +438,7 @@ const reminderQuote = ref('');
 const reminderError = ref('');
 const reminderStatusMessage = ref('');
 const reminderIsSaving = ref(false);
+const reminderInboxOpen = ref(false);
 const dailyJournalReminderStatusMessage = ref('');
 const dailyJournalReminderIsSaving = ref(false);
 const highlightedReminderTarget = ref<{
@@ -591,8 +595,7 @@ const showKnowledgeInspector = computed(() => {
 
   return (
     knowledgeInspectorMode.value === 'base' ||
-    knowledgeInspectorMode.value === 'base-edit' ||
-    knowledgeInspectorMode.value === 'note-create'
+    knowledgeInspectorMode.value === 'base-edit'
   );
 });
 
@@ -708,8 +711,7 @@ const showLabInspector = computed(() => {
 
   return (
     labInspectorMode.value === 'project' ||
-    labInspectorMode.value === 'project-edit' ||
-    labInspectorMode.value === 'record-create'
+    labInspectorMode.value === 'project-edit'
   );
 });
 
@@ -1074,6 +1076,15 @@ const activeReminders = computed(() =>
       new Date(reminder.scheduledAt).getTime() > Date.now(),
   ),
 );
+const inboxReminderItems = computed(() =>
+  reminders.value.filter(
+    (reminder) =>
+      reminder.canceledAt === null &&
+      reminder.acknowledgedAt === null &&
+      reminder.deliveredAt !== null,
+  ),
+);
+const inboxReminderCount = computed(() => inboxReminderItems.value.length);
 const todoSourceItems = computed(() =>
   todos.value.map((todo) => resolveTodoSource(todo)).filter((item) => !item.isMissing),
 );
@@ -1287,6 +1298,11 @@ function refreshEntries() {
 
 function refreshReminders() {
   reminders.value = getActiveReminders();
+}
+
+function syncDueReminderInbox() {
+  markDueRemindersDelivered();
+  refreshReminders();
 }
 
 function refreshDailyJournalReminder() {
@@ -1568,6 +1584,8 @@ function handleDocumentVisibilityChange() {
   }
 
   if (!document.hidden) {
+    syncDueReminderInbox();
+
     if (shouldRefreshJournalWeather()) {
       void refreshJournalWeather({ background: true });
     }
@@ -1841,6 +1859,16 @@ function formatTodoDateTime(timestamp?: number): string {
   }
 
   const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return `${getDateGroupLabel(date.toISOString())} ${formatEntryTime(date.toISOString())}`;
+}
+
+function formatReminderDateTime(value: string): string {
+  const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
     return '';
@@ -2751,6 +2779,8 @@ function scheduleSavedReminder(reminder: RecordReminder) {
 }
 
 function syncRecordRemindersOnLaunch() {
+  syncDueReminderInbox();
+
   if (recordReminderSyncPromise) {
     return;
   }
@@ -2768,6 +2798,34 @@ function syncRecordRemindersOnLaunch() {
       refreshReminders();
       recordReminderSyncPromise = null;
     });
+}
+
+function startReminderInboxPolling() {
+  clearReminderInboxPolling();
+  reminderInboxTimer = window.setInterval(syncDueReminderInbox, REMINDER_INBOX_POLL_INTERVAL);
+}
+
+function clearReminderInboxPolling() {
+  if (reminderInboxTimer !== null) {
+    window.clearInterval(reminderInboxTimer);
+    reminderInboxTimer = null;
+  }
+}
+
+function toggleReminderInbox() {
+  syncDueReminderInbox();
+  reminderInboxOpen.value = !reminderInboxOpen.value;
+}
+
+function openReminderFromInbox(reminder: RecordReminder) {
+  acknowledgeReminder(reminder.id);
+  refreshReminders();
+  reminderInboxOpen.value = false;
+  focusReminderTarget({
+    ...reminder,
+    deliveredAt: reminder.deliveredAt ?? new Date().toISOString(),
+    acknowledgedAt: new Date().toISOString(),
+  });
 }
 
 function saveReminder() {
@@ -2987,7 +3045,13 @@ function focusReminderById(reminderId: string) {
     return;
   }
 
-  focusReminderTarget(reminder);
+  acknowledgeReminder(reminder.id);
+  refreshReminders();
+  focusReminderTarget({
+    ...reminder,
+    deliveredAt: reminder.deliveredAt ?? new Date().toISOString(),
+    acknowledgedAt: new Date().toISOString(),
+  });
 }
 
 function isReminderHighlighted(
@@ -3972,9 +4036,20 @@ function startKnowledgeNoteComposer() {
     return;
   }
 
-  selectedKnowledgeNoteId.value = null;
-  knowledgeInspectorMode.value = 'note-create';
   cancelKnowledgeNoteEditing();
+  resetNewKnowledgeNoteForm();
+  knowledgeNoteComposerOpen.value = true;
+  void nextTick(() => {
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLTextAreaElement>('.knowledge-note-compose-sheet .journal-input')
+        ?.focus();
+    }, 120);
+  });
+}
+
+function closeKnowledgeNoteComposer() {
+  knowledgeNoteComposerOpen.value = false;
   resetNewKnowledgeNoteForm();
 }
 
@@ -4000,6 +4075,7 @@ function saveNewKnowledgeNote() {
   ensureKnowledgeBranchFilterForNote(note);
   selectedKnowledgeNoteId.value = note.id;
   knowledgeInspectorMode.value = 'note-view';
+  knowledgeNoteComposerOpen.value = false;
   resetNewKnowledgeNoteForm();
   refreshKnowledgeData();
 }
@@ -4537,9 +4613,20 @@ function startLabRecordComposer() {
     return;
   }
 
-  selectedLabRecordId.value = null;
-  labInspectorMode.value = 'record-create';
   cancelLabRecordEditing();
+  resetNewLabRecordForm();
+  labRecordComposerOpen.value = true;
+  void nextTick(() => {
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLTextAreaElement>('.lab-record-compose-sheet .journal-input')
+        ?.focus();
+    }, 120);
+  });
+}
+
+function closeLabRecordComposer() {
+  labRecordComposerOpen.value = false;
   resetNewLabRecordForm();
 }
 
@@ -4565,6 +4652,7 @@ function saveNewLabRecord() {
   ensureLabBranchFilterForRecord(record);
   selectedLabRecordId.value = record.id;
   labInspectorMode.value = 'record-view';
+  labRecordComposerOpen.value = false;
   resetNewLabRecordForm();
   refreshLabData();
 }
@@ -4861,10 +4949,12 @@ function setActivePark(park: ActivePark) {
   }
 
   if (park !== 'knowledge') {
+    knowledgeNoteComposerOpen.value = false;
     knowledgeDrawerOpen.value = false;
   }
 
   if (park !== 'lab') {
+    labRecordComposerOpen.value = false;
     labDrawerOpen.value = false;
   }
 
@@ -5326,6 +5416,7 @@ let removeReminderNotificationActionListener: (() => void) | null = null;
 let weatherRefreshTimer: number | null = null;
 let weatherAbortController: AbortController | null = null;
 let recordReminderSyncPromise: Promise<unknown> | null = null;
+let reminderInboxTimer: number | null = null;
 
 onMounted(() => {
   document.addEventListener('selectionchange', captureTodoSelectionFromWindow);
@@ -5339,6 +5430,7 @@ onMounted(() => {
   void refreshJournalWeather();
   scheduleWeatherRefresh();
   syncRecordRemindersOnLaunch();
+  startReminderInboxPolling();
   void syncDailyJournalReminderOnLaunch();
   void listenForReminderNotificationActions((action) => {
     if (action.kind === 'daily-journal-reminder') {
@@ -5367,6 +5459,7 @@ onBeforeUnmount(() => {
   weatherAbortController?.abort();
   weatherAbortController = null;
   clearWeatherRefreshTimer();
+  clearReminderInboxPolling();
   clearTodoCompletionTimer();
 });
 </script>
@@ -7339,104 +7432,6 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
-          <template v-else-if="knowledgeInspectorMode === 'note-create'">
-            <div class="section-heading compact knowledge-pane-heading">
-              <div>
-                <p class="eyebrow">新笔记</p>
-                <h2 id="knowledge-inspector-title">写入 {{ activeKnowledgeBase.name }}</h2>
-              </div>
-            </div>
-
-            <input
-              v-model="newKnowledgeNoteTitle"
-              class="title-input"
-              type="text"
-              maxlength="80"
-              placeholder="标题，可选"
-              aria-label="知识记录标题"
-            />
-            <textarea
-              v-model="newKnowledgeNoteContent"
-              class="journal-input"
-              placeholder="写下知识点、操作步骤、理解、坑点或结论。"
-              rows="10"
-            />
-            <div class="record-image-toolbar">
-              <button
-                class="ghost-action"
-                type="button"
-                :disabled="isImportingImages('knowledge-create') || newKnowledgeNoteImages.length >= MAX_RECORD_IMAGES"
-                @click="openImageImporter('knowledge-create')"
-              >
-                {{ isImportingImages('knowledge-create') ? '导入中...' : '导入图片' }}
-              </button>
-              <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
-            </div>
-            <div v-if="newKnowledgeNoteImages.length > 0" class="record-image-grid is-editor">
-              <div
-                v-for="image in newKnowledgeNoteImages"
-                :key="image.id"
-                class="record-image-card is-editor"
-              >
-                <button
-                  class="record-image-button"
-                  type="button"
-                  :aria-label="`预览 ${image.name}`"
-                  @click="openRecordImagePreview(image)"
-                >
-                  <img :src="image.dataUrl" :alt="image.name" />
-                </button>
-                <button
-                  class="record-image-remove"
-                  type="button"
-                  @click="removeImportedImage('knowledge-create', image.id)"
-                >
-                  移除
-                </button>
-              </div>
-            </div>
-            <label class="branch-field">
-              <span>归属分支</span>
-              <select v-model="newKnowledgeNoteBranchValue" class="branch-select">
-                <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
-                <option
-                  v-for="option in knowledgeBranchSelectOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <input
-              v-model="newKnowledgeNoteSourceUrl"
-              class="search-input compact-input"
-              type="url"
-              placeholder="来源链接，可选"
-              aria-label="知识记录来源链接"
-            />
-            <input
-              v-model="newKnowledgeNoteTags"
-              class="search-input compact-input"
-              type="text"
-              placeholder="标签，可选，用逗号分隔"
-              aria-label="知识记录标签"
-            />
-            <div class="entry-actions">
-              <button class="ghost-action" type="button" @click="showKnowledgeBaseSummary">
-                取消
-              </button>
-              <button
-                class="primary-action small"
-                type="button"
-                :disabled="!canCreateKnowledgeNote"
-                @click="saveNewKnowledgeNote"
-              >
-                保存笔记
-              </button>
-            </div>
-          </template>
-
           <template v-else-if="knowledgeInspectorMode === 'note-edit' && selectedKnowledgeNote">
             <div class="section-heading compact knowledge-pane-heading">
               <div>
@@ -8452,115 +8447,6 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
-          <template v-else-if="labInspectorMode === 'record-create'">
-            <div class="section-heading compact knowledge-pane-heading">
-              <div>
-                <p class="eyebrow">新记录</p>
-                <h2 id="lab-inspector-title">写入 {{ activeLabProject.name }}</h2>
-              </div>
-            </div>
-
-            <input
-              v-model="newLabRecordTitle"
-              class="title-input"
-              type="text"
-              maxlength="80"
-              placeholder="标题，可选"
-              aria-label="项目记录标题"
-            />
-
-            <div class="lab-type-switcher" aria-label="选择记录类型">
-              <button
-                v-for="type in labRecordTypeOptions"
-                :key="type.value"
-                type="button"
-                class="lab-type-option"
-                :class="[
-                  { active: newLabRecordType === type.value },
-                  `is-${type.value}`,
-                ]"
-                @click="newLabRecordType = type.value"
-              >
-                <strong>{{ type.label }}</strong>
-                <span>{{ type.hint }}</span>
-              </button>
-            </div>
-
-            <textarea
-              v-model="newLabRecordContent"
-              class="journal-input"
-              placeholder="写下这次做了什么，或者这次复盘看到了什么。"
-              rows="10"
-            />
-            <div class="record-image-toolbar">
-              <button
-                class="ghost-action"
-                type="button"
-                :disabled="isImportingImages('lab-create') || newLabRecordImages.length >= MAX_RECORD_IMAGES"
-                @click="openImageImporter('lab-create')"
-              >
-                {{ isImportingImages('lab-create') ? '导入中...' : '导入图片' }}
-              </button>
-              <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
-            </div>
-            <div v-if="newLabRecordImages.length > 0" class="record-image-grid is-editor">
-              <div
-                v-for="image in newLabRecordImages"
-                :key="image.id"
-                class="record-image-card is-editor"
-              >
-                <button
-                  class="record-image-button"
-                  type="button"
-                  :aria-label="`预览 ${image.name}`"
-                  @click="openRecordImagePreview(image)"
-                >
-                  <img :src="image.dataUrl" :alt="image.name" />
-                </button>
-                <button
-                  class="record-image-remove"
-                  type="button"
-                  @click="removeImportedImage('lab-create', image.id)"
-                >
-                  移除
-                </button>
-              </div>
-            </div>
-            <label class="branch-field">
-              <span>归属分支</span>
-              <select v-model="newLabRecordBranchValue" class="branch-select">
-                <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
-                <option
-                  v-for="option in labBranchSelectOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <input
-              v-model="newLabRecordTags"
-              class="search-input compact-input"
-              type="text"
-              placeholder="标签，可选，用逗号分隔"
-              aria-label="项目记录标签"
-            />
-            <div class="entry-actions">
-              <button class="ghost-action" type="button" @click="showLabProjectSummary">
-                取消
-              </button>
-              <button
-                class="primary-action small"
-                type="button"
-                :disabled="!canCreateLabRecord"
-                @click="saveNewLabRecord"
-              >
-                保存记录
-              </button>
-            </div>
-          </template>
-
           <template v-else-if="labInspectorMode === 'record-edit' && selectedLabRecord">
             <div class="section-heading compact knowledge-pane-heading">
               <div>
@@ -9034,6 +8920,247 @@ onBeforeUnmount(() => {
     </div>
 
     <div
+      v-if="knowledgeNoteComposerOpen && activeKnowledgeBase"
+      class="journal-compose-backdrop"
+      role="presentation"
+      @click.self="closeKnowledgeNoteComposer"
+    >
+      <section class="compose-card journal-compose-sheet knowledge-note-compose-sheet" aria-labelledby="knowledge-note-compose-title">
+        <div class="journal-compose-header">
+          <div>
+            <p class="eyebrow">新笔记</p>
+            <h2 id="knowledge-note-compose-title" class="journal-section-title">
+              写入 {{ activeKnowledgeBase.name }}
+            </h2>
+          </div>
+          <button
+            class="journal-compose-close"
+            type="button"
+            aria-label="关闭新增知识笔记"
+            @click="closeKnowledgeNoteComposer"
+          >
+            ×
+          </button>
+        </div>
+
+        <input
+          v-model="newKnowledgeNoteTitle"
+          class="title-input"
+          type="text"
+          maxlength="80"
+          placeholder="标题，可选"
+          aria-label="知识记录标题"
+        />
+        <textarea
+          v-model="newKnowledgeNoteContent"
+          class="journal-input"
+          placeholder="写下知识点、操作步骤、理解、坑点或结论。"
+          rows="10"
+        />
+        <div class="record-image-toolbar">
+          <button
+            class="ghost-action"
+            type="button"
+            :disabled="isImportingImages('knowledge-create') || newKnowledgeNoteImages.length >= MAX_RECORD_IMAGES"
+            @click="openImageImporter('knowledge-create')"
+          >
+            {{ isImportingImages('knowledge-create') ? '导入中...' : '导入图片' }}
+          </button>
+          <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+        </div>
+        <div v-if="newKnowledgeNoteImages.length > 0" class="record-image-grid is-editor">
+          <div
+            v-for="image in newKnowledgeNoteImages"
+            :key="image.id"
+            class="record-image-card is-editor"
+          >
+            <button
+              class="record-image-button"
+              type="button"
+              :aria-label="`预览 ${image.name}`"
+              @click="openRecordImagePreview(image)"
+            >
+              <img :src="image.dataUrl" :alt="image.name" />
+            </button>
+            <button
+              class="record-image-remove"
+              type="button"
+              @click="removeImportedImage('knowledge-create', image.id)"
+            >
+              移除
+            </button>
+          </div>
+        </div>
+        <label class="branch-field">
+          <span>归属分支</span>
+          <select v-model="newKnowledgeNoteBranchValue" class="branch-select">
+            <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+            <option
+              v-for="option in knowledgeBranchSelectOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <input
+          v-model="newKnowledgeNoteSourceUrl"
+          class="search-input compact-input"
+          type="url"
+          placeholder="来源链接，可选"
+          aria-label="知识记录来源链接"
+        />
+        <input
+          v-model="newKnowledgeNoteTags"
+          class="search-input compact-input"
+          type="text"
+          placeholder="标签，可选，用逗号分隔"
+          aria-label="知识记录标签"
+        />
+        <div class="entry-actions">
+          <button class="ghost-action" type="button" @click="closeKnowledgeNoteComposer">
+            取消
+          </button>
+          <button
+            class="primary-action small"
+            type="button"
+            :disabled="!canCreateKnowledgeNote"
+            @click="saveNewKnowledgeNote"
+          >
+            保存笔记
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="labRecordComposerOpen && activeLabProject"
+      class="journal-compose-backdrop"
+      role="presentation"
+      @click.self="closeLabRecordComposer"
+    >
+      <section class="compose-card journal-compose-sheet lab-record-compose-sheet" aria-labelledby="lab-record-compose-title">
+        <div class="journal-compose-header">
+          <div>
+            <p class="eyebrow">新记录</p>
+            <h2 id="lab-record-compose-title" class="journal-section-title">
+              写入 {{ activeLabProject.name }}
+            </h2>
+          </div>
+          <button
+            class="journal-compose-close"
+            type="button"
+            aria-label="关闭新增项目记录"
+            @click="closeLabRecordComposer"
+          >
+            ×
+          </button>
+        </div>
+
+        <input
+          v-model="newLabRecordTitle"
+          class="title-input"
+          type="text"
+          maxlength="80"
+          placeholder="标题，可选"
+          aria-label="项目记录标题"
+        />
+
+        <div class="lab-type-switcher" aria-label="选择记录类型">
+          <button
+            v-for="type in labRecordTypeOptions"
+            :key="type.value"
+            type="button"
+            class="lab-type-option"
+            :class="[
+              { active: newLabRecordType === type.value },
+              `is-${type.value}`,
+            ]"
+            @click="newLabRecordType = type.value"
+          >
+            <strong>{{ type.label }}</strong>
+            <span>{{ type.hint }}</span>
+          </button>
+        </div>
+
+        <textarea
+          v-model="newLabRecordContent"
+          class="journal-input"
+          placeholder="写下这次做了什么，或者这次复盘看到了什么。"
+          rows="10"
+        />
+        <div class="record-image-toolbar">
+          <button
+            class="ghost-action"
+            type="button"
+            :disabled="isImportingImages('lab-create') || newLabRecordImages.length >= MAX_RECORD_IMAGES"
+            @click="openImageImporter('lab-create')"
+          >
+            {{ isImportingImages('lab-create') ? '导入中...' : '导入图片' }}
+          </button>
+          <small>最多 {{ MAX_RECORD_IMAGES }} 张。</small>
+        </div>
+        <div v-if="newLabRecordImages.length > 0" class="record-image-grid is-editor">
+          <div
+            v-for="image in newLabRecordImages"
+            :key="image.id"
+            class="record-image-card is-editor"
+          >
+            <button
+              class="record-image-button"
+              type="button"
+              :aria-label="`预览 ${image.name}`"
+              @click="openRecordImagePreview(image)"
+            >
+              <img :src="image.dataUrl" :alt="image.name" />
+            </button>
+            <button
+              class="record-image-remove"
+              type="button"
+              @click="removeImportedImage('lab-create', image.id)"
+            >
+              移除
+            </button>
+          </div>
+        </div>
+        <label class="branch-field">
+          <span>归属分支</span>
+          <select v-model="newLabRecordBranchValue" class="branch-select">
+            <option :value="BRANCH_UNGROUPED_VALUE">未分组</option>
+            <option
+              v-for="option in labBranchSelectOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <input
+          v-model="newLabRecordTags"
+          class="search-input compact-input"
+          type="text"
+          placeholder="标签，可选，用逗号分隔"
+          aria-label="项目记录标签"
+        />
+        <div class="entry-actions">
+          <button class="ghost-action" type="button" @click="closeLabRecordComposer">
+            取消
+          </button>
+          <button
+            class="primary-action small"
+            type="button"
+            :disabled="!canCreateLabRecord"
+            @click="saveNewLabRecord"
+          >
+            保存记录
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
       v-if="reminderComposerOpen && reminderTarget"
       class="reminder-modal-backdrop"
       role="presentation"
@@ -9133,6 +9260,60 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
+    </div>
+
+    <div class="reminder-inbox-layer">
+      <button
+        class="reminder-inbox-fab"
+        type="button"
+        :aria-expanded="reminderInboxOpen"
+        aria-controls="reminder-inbox-panel"
+        aria-label="打开提醒箱"
+        @click="toggleReminderInbox"
+      >
+        <span class="reminder-inbox-mark" aria-hidden="true">提</span>
+        <span v-if="inboxReminderCount > 0" class="reminder-inbox-badge">
+          {{ inboxReminderCount > 99 ? '99+' : inboxReminderCount }}
+        </span>
+      </button>
+
+      <section
+        v-if="reminderInboxOpen"
+        id="reminder-inbox-panel"
+        class="reminder-inbox-panel"
+        aria-labelledby="reminder-inbox-title"
+      >
+        <header class="reminder-inbox-header">
+          <div>
+            <p class="eyebrow">Reminder box</p>
+            <h2 id="reminder-inbox-title">提醒箱</h2>
+            <span>点开具体事项后才会从未完成里移除。</span>
+          </div>
+          <button class="panel-close" type="button" @click="reminderInboxOpen = false">
+            关闭
+          </button>
+        </header>
+
+        <div v-if="inboxReminderItems.length === 0" class="reminder-inbox-empty">
+          <p>没有未完成提醒。</p>
+          <span>到点后的提醒会先留在这里。</span>
+        </div>
+
+        <div v-else class="reminder-inbox-list">
+          <button
+            v-for="reminder in inboxReminderItems"
+            :key="reminder.id"
+            class="reminder-inbox-item"
+            type="button"
+            @click="openReminderFromInbox(reminder)"
+          >
+            <span>{{ getTargetTypeLabel(reminder.targetType) }}</span>
+            <strong>{{ reminder.reminderTitle }}</strong>
+            <small>{{ formatReminderDateTime(reminder.scheduledAt) }}</small>
+            <p>{{ reminder.quote || reminder.targetTitle }}</p>
+          </button>
+        </div>
+      </section>
     </div>
 
     <div

@@ -14,6 +14,8 @@ export interface RecordReminder {
   quote: string;
   anchorStart: number | null;
   scheduledAt: string;
+  deliveredAt: string | null;
+  acknowledgedAt: string | null;
   createdAt: string;
   updatedAt: string;
   canceledAt: string | null;
