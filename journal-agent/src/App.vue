@@ -334,6 +334,7 @@ const journalWeatherSnapshot = ref<WeatherSnapshot | null>(null);
 const journalWeatherLoading = ref(false);
 const journalWeatherStatusMessage = ref('Open-Meteo · 正在获取天气');
 const journalWeatherLastLoadedAt = ref<number | null>(null);
+const journalComposerOpen = ref(false);
 const draftTitle = ref('');
 const draftContent = ref('');
 const draftEntryDate = ref(getLocalDateKey(new Date()));
@@ -2618,20 +2619,28 @@ function composeForSelectedDate() {
   focusJournalComposer();
 }
 
+function openJournalComposer() {
+  activePark.value = 'journal';
+  activeView.value = 'timeline';
+  cancelEditing();
+  focusJournalComposer();
+}
+
+function closeJournalComposer() {
+  journalComposerOpen.value = false;
+}
+
 function getDefaultReminderDateTime(): string {
   return toDateTimeLocalInputValue(new Date(Date.now() + 60 * 60_000));
 }
 
 function focusJournalComposer() {
-  void nextTick(() => {
-    document.querySelector('.compose-card')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
+  journalComposerOpen.value = true;
 
+  void nextTick(() => {
     window.setTimeout(() => {
       document
-        .querySelector<HTMLTextAreaElement>('.compose-card .journal-input')
+        .querySelector<HTMLTextAreaElement>('.journal-compose-sheet .journal-input')
         ?.focus();
     }, 120);
   });
@@ -4847,6 +4856,10 @@ function setActivePark(park: ActivePark) {
   cancelKnowledgeNoteEditing();
   cancelLabRecordEditing();
 
+  if (park !== 'journal') {
+    journalComposerOpen.value = false;
+  }
+
   if (park !== 'knowledge') {
     knowledgeDrawerOpen.value = false;
   }
@@ -4886,6 +4899,7 @@ function saveDraft() {
   draftImages.value = [];
   selectedDateKey.value = entry.entryDate;
   calendarMonth.value = startOfMonth(new Date(`${entry.entryDate}T00:00:00`));
+  journalComposerOpen.value = false;
   refreshEntries();
 }
 
@@ -5420,20 +5434,22 @@ onBeforeUnmount(() => {
             <div class="hero-content-stack">
               <div class="hero-headline-row">
                 <div class="hero-title-block">
-                <h1 id="app-title">{{ activeParkSummary.title }}</h1>
+                  <h1 id="app-title">{{ activeParkSummary.title }}</h1>
                 </div>
 
-                <JournalWeatherHeroCard
-                  v-if="activePark === 'journal'"
-                  class="hero-weather-inline"
-                  :snapshot="journalWeatherSnapshot"
-                  :loading="journalWeatherLoading"
-                  :meta-text="journalWeatherMetaText"
-                  @retry="refreshJournalWeather"
-                />
+                <div v-if="activePark === 'journal'" class="hero-weather-stack">
+                  <JournalWeatherHeroCard
+                    class="hero-weather-inline"
+                    :snapshot="journalWeatherSnapshot"
+                    :loading="journalWeatherLoading"
+                    :meta-text="journalWeatherMetaText"
+                    @retry="refreshJournalWeather"
+                  />
+                  <p class="today-line">{{ activeParkSummary.description }}</p>
+                </div>
               </div>
 
-              <p class="today-line">{{ activeParkSummary.description }}</p>
+              <p v-if="activePark !== 'journal'" class="today-line">{{ activeParkSummary.description }}</p>
             </div>
           </div>
         </template>
@@ -5468,73 +5484,6 @@ onBeforeUnmount(() => {
           日历
         </button>
       </nav>
-
-      <section v-if="activeView === 'timeline'" class="compose-card" aria-labelledby="compose-title">
-      <h2 id="compose-title" class="journal-section-title">写到 {{ draftDateLabel }}</h2>
-
-      <label class="journal-date-field">
-        <span>记录日期</span>
-        <input
-          v-model="draftEntryDate"
-          class="date-input"
-          type="date"
-          aria-label="记录归属日期"
-        />
-        <small>{{ draftDateTone }}</small>
-      </label>
-
-      <input
-        v-model="draftTitle"
-        class="title-input"
-        type="text"
-        maxlength="18"
-        placeholder="标题，可选"
-        aria-label="日志标题"
-      />
-
-      <textarea
-        v-model="draftContent"
-        class="journal-input"
-        placeholder="写下刚刚发生的事、一个念头，或者一句想留住的话。"
-        rows="6"
-      />
-
-      <div class="record-image-toolbar">
-        <button
-          class="ghost-action"
-          type="button"
-          :disabled="isImportingImages('journal-draft') || draftImages.length >= MAX_RECORD_IMAGES"
-          @click="openImageImporter('journal-draft')"
-        >
-          {{ isImportingImages('journal-draft') ? '导入中...' : '导入图片' }}
-        </button>
-        <small>最多 {{ MAX_RECORD_IMAGES }} 张，导入后会自动压缩并保存在本地。</small>
-      </div>
-
-      <div v-if="draftImages.length > 0" class="record-image-grid is-editor">
-        <div v-for="image in draftImages" :key="image.id" class="record-image-card is-editor">
-          <button
-            class="record-image-button"
-            type="button"
-            :aria-label="`预览 ${image.name}`"
-            @click="openRecordImagePreview(image)"
-          >
-            <img :src="image.dataUrl" :alt="image.name" />
-          </button>
-          <button
-            class="record-image-remove"
-            type="button"
-            @click="removeImportedImage('journal-draft', image.id)"
-          >
-            移除
-          </button>
-        </div>
-      </div>
-
-      <button class="primary-action" type="button" :disabled="!canSaveDraft" @click="saveDraft">
-        保存这一刻
-      </button>
-    </section>
 
     <section v-if="activeView === 'search'" class="tool-card" aria-labelledby="search-title">
       <div class="section-heading">
@@ -6065,9 +6014,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="activeView === 'timeline'" class="timeline" aria-labelledby="timeline-title">
-      <h2 id="timeline-title" class="journal-section-title">日志时间线</h2>
-
+    <section v-if="activeView === 'timeline'" class="timeline" aria-label="日志时间线">
       <label
         v-if="hasDoneSentenceTodosForPark('journal')"
         class="todo-hide-toggle"
@@ -6333,6 +6280,100 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </section>
+
+    <button
+      v-if="activePark === 'journal'"
+      class="journal-compose-fab"
+      type="button"
+      aria-label="添加记录"
+      @click="openJournalComposer"
+    >
+      +
+    </button>
+
+    <div
+      v-if="journalComposerOpen"
+      class="journal-compose-backdrop"
+      role="presentation"
+      @click.self="closeJournalComposer"
+    >
+      <section class="compose-card journal-compose-sheet" aria-labelledby="compose-title">
+          <div class="journal-compose-header">
+            <h2 id="compose-title" class="journal-section-title">写到 {{ draftDateLabel }}</h2>
+            <button
+              class="journal-compose-close"
+              type="button"
+              aria-label="关闭添加记录"
+              @click="closeJournalComposer"
+            >
+              ×
+            </button>
+          </div>
+
+          <label class="journal-date-field">
+            <span>记录日期</span>
+            <input
+              v-model="draftEntryDate"
+              class="date-input"
+              type="date"
+              aria-label="记录归属日期"
+            />
+            <small>{{ draftDateTone }}</small>
+          </label>
+
+          <input
+            v-model="draftTitle"
+            class="title-input"
+            type="text"
+            maxlength="18"
+            placeholder="标题，可选"
+            aria-label="日志标题"
+          />
+
+          <textarea
+            v-model="draftContent"
+            class="journal-input"
+            placeholder="写下刚刚发生的事、一个念头，或者一句想留住的话。"
+            rows="6"
+          />
+
+          <div class="record-image-toolbar">
+            <button
+              class="ghost-action"
+              type="button"
+              :disabled="isImportingImages('journal-draft') || draftImages.length >= MAX_RECORD_IMAGES"
+              @click="openImageImporter('journal-draft')"
+            >
+              {{ isImportingImages('journal-draft') ? '导入中...' : '导入图片' }}
+            </button>
+            <small>最多 {{ MAX_RECORD_IMAGES }} 张，导入后会自动压缩并保存在本地。</small>
+          </div>
+
+          <div v-if="draftImages.length > 0" class="record-image-grid is-editor">
+            <div v-for="image in draftImages" :key="image.id" class="record-image-card is-editor">
+              <button
+                class="record-image-button"
+                type="button"
+                :aria-label="`预览 ${image.name}`"
+                @click="openRecordImagePreview(image)"
+              >
+                <img :src="image.dataUrl" :alt="image.name" />
+              </button>
+              <button
+                class="record-image-remove"
+                type="button"
+                @click="removeImportedImage('journal-draft', image.id)"
+              >
+                移除
+              </button>
+            </div>
+          </div>
+
+          <button class="primary-action" type="button" :disabled="!canSaveDraft" @click="saveDraft">
+            保存这一刻
+          </button>
+        </section>
+      </div>
     </section>
 
     <section
