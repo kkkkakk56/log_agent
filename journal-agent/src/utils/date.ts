@@ -11,6 +11,7 @@ export type CalendarDay = {
 };
 
 type JournalDateGroup = {
+  dateKey: string;
   label: string;
   entries: JournalEntry[];
 };
@@ -130,7 +131,7 @@ export const buildCalendarDays = (monthDate: Date): CalendarDay[] => {
 
 export const groupEntriesByDate = (
   entries: JournalEntry[],
-): Array<{ label: string; entries: JournalEntry[] }> => {
+): JournalDateGroup[] => {
   const groups = new Map<string, JournalDateGroup>();
   const sortedEntries = [...entries].sort(
     (firstEntry, secondEntry) =>
@@ -147,7 +148,7 @@ export const groupEntriesByDate = (
     if (group) {
       group.entries.push(entry);
     } else {
-      groups.set(key, { label, entries: [entry] });
+      groups.set(key, { dateKey: key, label, entries: [entry] });
     }
   }
 

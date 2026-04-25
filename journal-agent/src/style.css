@@ -269,115 +269,31 @@ a { color: var(--accent); text-decoration: none; }
 }
 .journal-app > * { position: relative; z-index: 1; }
 
-/* ---------- 5. Hero (大标题栏) ---------- */
-.hero-panel {
+/* ---------- 5. Park switcher ---------- */
+.park-switcher {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
   position: sticky;
   top: 0;
   z-index: 20;
-  margin: 0 -6px 8px;
-  padding: 8px 8px 18px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 34%, transparent), transparent 68%), var(--bg-chrome);
-  border-bottom: 1px solid color-mix(in srgb, var(--line-1) 92%, transparent);
-  border-radius: 0 0 24px 24px;
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  animation: soft-enter 0.5s var(--motion-ease);
-}
-
-.hero-main { display: flex; flex-direction: column; gap: 18px; }
-
-.hero-content-row {
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
-}
-
-.hero-content-stack {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.hero-headline-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-
-.hero-title-block {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.hero-weather-inline {
-  flex: 0 0 auto;
-  min-width: 0;
-}
-
-.hero-weather-stack {
-  display: flex;
-  flex: 0 0 auto;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5px;
-}
-
-.hero-weather-inline .weather-inline-main {
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--bg-base) 86%, transparent);
-  border: 1px solid color-mix(in srgb, var(--line-1) 84%, transparent);
-  border-radius: var(--r-pill);
-  box-shadow: var(--shadow-1);
-}
-
-.hero-panel h1 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-weight: 700;
-  font-size: 34px;
-  letter-spacing: -0.03em;
-  color: var(--ink-1);
-  line-height: 1.18;
-}
-
-.today-line {
-  margin: 4px 0 0;
-  font-size: 15px;
-  color: var(--ink-3);
-  line-height: 1.33;
-}
-.hero-weather-stack .today-line {
-  max-width: 210px;
-  margin: 0;
-  text-align: right;
-  font-size: 13px;
-  line-height: 1.25;
-}
-
-/* Park switcher — segmented pill */
-.park-switcher {
-  display: inline-flex;
-  align-self: flex-start;
   gap: 3px;
-  max-width: 100%;
+  width: 100%;
+  margin: 0 0 14px;
   padding: 3px;
-  background: color-mix(in srgb, var(--bg-canvas) 78%, var(--bg-base));
+  background: var(--bg-chrome);
   border: 1px solid color-mix(in srgb, var(--line-1) 78%, transparent);
   border-radius: var(--r-pill);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
 .park-switcher button {
-  padding: 9px 16px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 6px;
   border-radius: var(--r-pill);
   color: var(--ink-3);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 400;
+  white-space: nowrap;
   transition: all 0.2s var(--motion-ease);
 }
 .park-switcher button.active {
@@ -387,25 +303,6 @@ a { color: var(--accent); text-decoration: none; }
 }
 .park-switcher button:not(.active):hover { color: var(--ink-1); }
 .park-switcher button:active { transform: scale(var(--tap-scale)); }
-
-/* Header actions */
-/* Knowledge park header variant */
-.knowledge-hero-panel { gap: 12px; padding-bottom: 12px; }
-.knowledge-hero-title {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.knowledge-page-title {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-weight: 700;
-  font-size: 34px;
-  letter-spacing: -0.03em;
-  line-height: 1.18;
-  color: var(--ink-1);
-  overflow-wrap: anywhere;
-}
 .icon-button {
   width: 44px; height: 44px;
   display: grid; place-items: center;
@@ -786,10 +683,15 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 /* ---------- 10. Entry cards (日志条目) ---------- */
-.entry-groups { display: flex; flex-direction: column; gap: 18px; }
-.entry-group { display: flex; flex-direction: column; gap: 10px; }
+.entry-groups { display: flex; flex-direction: column; gap: 14px; }
+.entry-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  scroll-margin-top: 58px;
+}
 .entry-group h3 {
-  margin: 6px 4px 4px;
+  margin: 4px 4px 0;
   font-size: 20px;
   font-weight: 600;
   line-height: 1.25;
@@ -1753,6 +1655,20 @@ a { color: var(--accent); text-decoration: none; }
   position: relative;
 }
 .knowledge-pane-heading { padding-bottom: 6px; }
+.pane-title-with-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.pane-title-with-toggle > div {
+  min-width: 0;
+}
+.pane-title-with-toggle .knowledge-drawer-toggle {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+}
 
 .knowledge-note-items {
   display: flex;
@@ -3272,8 +3188,6 @@ a { color: var(--accent); text-decoration: none; }
     padding-left: calc(14px + env(safe-area-inset-left));
     padding-right: calc(14px + env(safe-area-inset-right));
   }
-  .hero-panel h1 { font-size: 34px; }
-  .hero-content-row { gap: 12px; }
   .compose-card, .tool-card, .park-placeholder,
   .knowledge-notes-pane, .knowledge-inspector,
   .lab-records-pane, .lab-inspector { padding: 18px; }
@@ -3307,11 +3221,6 @@ a { color: var(--accent); text-decoration: none; }
     font-size: 12px;
     line-height: 1.15;
     white-space: nowrap;
-  }
-
-  .knowledge-page-title {
-    font-size: 28px;
-    line-height: 1.12;
   }
 
   .section-heading,
@@ -3359,18 +3268,6 @@ a { color: var(--accent); text-decoration: none; }
   .todo-card-strip small {
     width: 100%;
     margin-left: 0;
-  }
-}
-
-@media (max-width: 760px) {
-  .hero-content-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .hero-headline-row {
-    flex-wrap: wrap;
-    align-items: stretch;
   }
 }
 

@@ -7,7 +7,6 @@ import {
   ref,
   type CSSProperties,
 } from 'vue';
-import JournalWeatherHeroCard from './components/JournalWeatherHeroCard.vue';
 import type { CalendarDay } from './utils/date';
 import type { RecordBranch } from './types/branch';
 import type { JournalEntry } from './types/journal';
@@ -1052,22 +1051,6 @@ const parkSummaries = computed<ParkSummary[]>(() => [
       : '先设置一个解锁密码，再把项目账号和密码收进来。',
   },
 ]);
-
-const activeParkSummary = computed(
-  () =>
-    parkSummaries.value.find((park) => park.id === activePark.value) ??
-    parkSummaries.value[0],
-);
-const journalWeatherMetaText = computed(() => {
-  if (journalWeatherSnapshot.value && !journalWeatherStatusMessage.value) {
-    return [
-      journalWeatherSnapshot.value.locationSourceLabel,
-      journalWeatherSnapshot.value.updatedLabel,
-    ].join(' · ');
-  }
-
-  return journalWeatherStatusMessage.value;
-});
 
 const draftCharacterCount = computed(() => draftContent.value.trim().length);
 const canSaveDraft = computed(
@@ -5122,12 +5105,32 @@ function setActiveView(view: ActiveView) {
   cancelEditing();
 }
 
+function scrollJournalTimelineToToday() {
+  void nextTick(() => {
+    window.setTimeout(() => {
+      const todayGroup = document.querySelector<HTMLElement>(
+        `[data-journal-date-group="${getLocalDateKey(new Date())}"]`,
+      );
+
+      todayGroup?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 80);
+  });
+}
+
 function setActivePark(park: ActivePark) {
   if (activePark.value === 'vault' && park !== 'vault' && isVaultUnlocked.value) {
     lockVault('密库已自动上锁。');
   }
 
   activePark.value = park;
+
+  if (park === 'journal') {
+    activeView.value = 'timeline';
+  }
+
   cancelEditing();
   cancelKnowledgeNoteEditing();
   cancelLabRecordEditing();
@@ -5157,6 +5160,10 @@ function setActivePark(park: ActivePark) {
 
   if (park === 'lab' && activeLabProject.value && !selectedLabRecord.value) {
     labInspectorMode.value = 'project';
+  }
+
+  if (park === 'journal') {
+    scrollJournalTimelineToToday();
   }
 }
 
@@ -5659,88 +5666,17 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="journal-app">
-    <section
-      class="hero-panel"
-      :class="{ 'knowledge-hero-panel': activePark === 'knowledge' || activePark === 'lab' }"
-      aria-labelledby="app-title"
-    >
-      <div class="hero-main">
-        <nav class="park-switcher" aria-label="记录 Park">
-          <button
-            v-for="park in parkSummaries"
-            :key="park.id"
-            type="button"
-            :class="{ active: activePark === park.id }"
-            @click="setActivePark(park.id)"
-          >
-            <span>{{ park.label }}</span>
-          </button>
-        </nav>
-
-        <template v-if="activePark === 'knowledge'">
-          <div class="knowledge-hero-title">
-            <button
-              class="icon-button knowledge-drawer-toggle"
-              type="button"
-              :aria-expanded="knowledgeDrawerOpen"
-              aria-controls="knowledge-drawer"
-              @click="toggleKnowledgeDrawer"
-            >
-              <span class="knowledge-drawer-icon" aria-hidden="true">
-                <i></i>
-                <i></i>
-                <i></i>
-              </span>
-            </button>
-            <h1 id="app-title" class="knowledge-page-title">{{ activeParkSummary.title }}</h1>
-          </div>
-        </template>
-
-        <template v-else-if="activePark === 'lab'">
-          <div class="knowledge-hero-title">
-            <button
-              class="icon-button knowledge-drawer-toggle"
-              type="button"
-              :aria-expanded="labDrawerOpen"
-              aria-controls="lab-drawer"
-              @click="toggleLabDrawer"
-            >
-              <span class="knowledge-drawer-icon" aria-hidden="true">
-                <i></i>
-                <i></i>
-                <i></i>
-              </span>
-            </button>
-            <h1 id="app-title" class="knowledge-page-title">{{ activeParkSummary.title }}</h1>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="hero-content-row">
-            <div class="hero-content-stack">
-              <div class="hero-headline-row">
-                <div class="hero-title-block">
-                  <h1 id="app-title">{{ activeParkSummary.title }}</h1>
-                </div>
-
-                <div v-if="activePark === 'journal'" class="hero-weather-stack">
-                  <JournalWeatherHeroCard
-                    class="hero-weather-inline"
-                    :snapshot="journalWeatherSnapshot"
-                    :loading="journalWeatherLoading"
-                    :meta-text="journalWeatherMetaText"
-                    @retry="refreshJournalWeather"
-                  />
-                  <p class="today-line">{{ activeParkSummary.description }}</p>
-                </div>
-              </div>
-
-              <p v-if="activePark !== 'journal'" class="today-line">{{ activeParkSummary.description }}</p>
-            </div>
-          </div>
-        </template>
-      </div>
-    </section>
+    <nav class="park-switcher" aria-label="记录 Park">
+      <button
+        v-for="park in parkSummaries"
+        :key="park.id"
+        type="button"
+        :class="{ active: activePark === park.id }"
+        @click="setActivePark(park.id)"
+      >
+        <span>{{ park.label }}</span>
+      </button>
+    </nav>
 
     <section
       v-if="activePark === 'journal'"
@@ -6315,7 +6251,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-else class="entry-groups">
-        <section v-for="group in groupedEntries" :key="group.label" class="entry-group">
+        <section
+          v-for="group in groupedEntries"
+          :key="group.dateKey"
+          class="entry-group"
+          :data-journal-date-group="group.dateKey"
+        >
           <h3>{{ group.label }}</h3>
 
           <article
@@ -7314,17 +7255,33 @@ onBeforeUnmount(() => {
       >
         <section class="knowledge-notes-pane" aria-labelledby="knowledge-notes-title">
           <div class="section-heading compact knowledge-pane-heading knowledge-pane-toolbar">
-            <div>
-              <h2 id="knowledge-notes-title">
-                {{ activeKnowledgeBase ? activeKnowledgeBase.name : '选择仓库' }}
-              </h2>
-              <small v-if="activeKnowledgeBase" class="branch-scope-label">
-                {{ describeBranchFilter(activeKnowledgeBranchFilterId, activeKnowledgeBaseBranches) }}
-                ·
-                {{ activeKnowledgeNotes.length }} 条
-                ·
-                已置顶 {{ activeKnowledgePinnedCount }}/{{ MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE }}
-              </small>
+            <div class="pane-title-with-toggle">
+              <button
+                class="icon-button knowledge-drawer-toggle"
+                type="button"
+                :aria-expanded="knowledgeDrawerOpen"
+                aria-controls="knowledge-drawer"
+                aria-label="打开仓库列表"
+                @click="toggleKnowledgeDrawer"
+              >
+                <span class="knowledge-drawer-icon" aria-hidden="true">
+                  <i></i>
+                  <i></i>
+                  <i></i>
+                </span>
+              </button>
+              <div>
+                <h2 id="knowledge-notes-title">
+                  {{ activeKnowledgeBase ? activeKnowledgeBase.name : '选择仓库' }}
+                </h2>
+                <small v-if="activeKnowledgeBase" class="branch-scope-label">
+                  {{ describeBranchFilter(activeKnowledgeBranchFilterId, activeKnowledgeBaseBranches) }}
+                  ·
+                  {{ activeKnowledgeNotes.length }} 条
+                  ·
+                  已置顶 {{ activeKnowledgePinnedCount }}/{{ MAX_PINNED_KNOWLEDGE_NOTES_PER_BASE }}
+                </small>
+              </div>
             </div>
             <div v-if="activeKnowledgeBase" class="knowledge-pane-actions">
               <button class="ghost-action" type="button" @click="toggleKnowledgeBranchPanel">
@@ -8044,17 +8001,33 @@ onBeforeUnmount(() => {
       >
         <section class="lab-records-pane" aria-labelledby="lab-records-title">
           <div class="section-heading compact knowledge-pane-heading knowledge-pane-toolbar">
-            <div>
-              <h2 id="lab-records-title">
-                {{ activeLabProject ? activeLabProject.name : '选择项目' }}
-              </h2>
-              <small v-if="activeLabProject" class="branch-scope-label">
-                {{ describeBranchFilter(activeLabBranchFilterId, activeLabProjectBranches) }}
-                ·
-                {{ activeLabRecords.length }} 条
-                ·
-                已置顶 {{ activeLabPinnedCount }}/{{ MAX_PINNED_LAB_RECORDS_PER_PROJECT }}
-              </small>
+            <div class="pane-title-with-toggle">
+              <button
+                class="icon-button knowledge-drawer-toggle"
+                type="button"
+                :aria-expanded="labDrawerOpen"
+                aria-controls="lab-drawer"
+                aria-label="打开项目列表"
+                @click="toggleLabDrawer"
+              >
+                <span class="knowledge-drawer-icon" aria-hidden="true">
+                  <i></i>
+                  <i></i>
+                  <i></i>
+                </span>
+              </button>
+              <div>
+                <h2 id="lab-records-title">
+                  {{ activeLabProject ? activeLabProject.name : '选择项目' }}
+                </h2>
+                <small v-if="activeLabProject" class="branch-scope-label">
+                  {{ describeBranchFilter(activeLabBranchFilterId, activeLabProjectBranches) }}
+                  ·
+                  {{ activeLabRecords.length }} 条
+                  ·
+                  已置顶 {{ activeLabPinnedCount }}/{{ MAX_PINNED_LAB_RECORDS_PER_PROJECT }}
+                </small>
+              </div>
             </div>
             <div v-if="activeLabProject" class="knowledge-pane-actions">
               <button class="ghost-action" type="button" @click="toggleLabBranchPanel">
