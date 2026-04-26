@@ -1258,8 +1258,9 @@ a { color: var(--accent); text-decoration: none; }
 .month-action:hover { background: var(--accent-soft); }
 
 .calendar-grid {
+  width: 100%;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 4px;
 }
 .calendar-weekdays {
@@ -1275,6 +1276,8 @@ a { color: var(--accent); text-decoration: none; }
   text-transform: uppercase;
 }
 .calendar-day {
+  min-width: 0;
+  width: 100%;
   aspect-ratio: 1;
   display: flex;
   flex-direction: column;
@@ -1290,6 +1293,7 @@ a { color: var(--accent); text-decoration: none; }
   font-weight: 500;
   transition: all 0.18s var(--motion-ease);
   position: relative;
+  overflow: hidden;
 }
 .calendar-day small {
   font-size: 10px;
@@ -3191,6 +3195,23 @@ a { color: var(--accent); text-decoration: none; }
   .compose-card, .tool-card, .park-placeholder,
   .knowledge-notes-pane, .knowledge-inspector,
   .lab-records-pane, .lab-inspector { padding: 18px; }
+  .calendar-grid {
+    gap: 3px;
+  }
+  .calendar-weekdays {
+    padding: 0;
+  }
+  .calendar-day {
+    border-radius: 9px;
+    font-size: 14px;
+  }
+  .calendar-day small {
+    min-width: 14px;
+    height: 13px;
+    padding: 0 4px;
+    font-size: 9px;
+    line-height: 13px;
+  }
   .search-input-row {
     flex-direction: column;
     align-items: stretch;
